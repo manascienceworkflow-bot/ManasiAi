@@ -49,6 +49,7 @@ Trigger Examples:
 - Would MNRI be beneficial for us?
 - Do you recommend MNRI?
 - Is MNRI worth trying?
+- Help me navigate MNRI
 
 ## Comparison Questions
 - MNRI vs Neurofeedback.

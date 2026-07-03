@@ -3,7 +3,9 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-
+print("=" * 60, flush=True)
+print("BUILD SCRIPT STARTED", flush=True)
+print("=" * 60, flush=True)
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: E402
@@ -129,6 +131,11 @@ def build_metadata_envelope(chunk: dict, chunk_index: int) -> dict:
 
 
 def main():
+    import os
+
+    print("CHROMA_PERSIST_DIR ENV =", os.getenv("CHROMA_PERSIST_DIR"), flush=True)
+    print("Resolved Persist Dir =", settings.chroma_persist_dir, flush=True)
+    print("Current Working Dir =", Path.cwd(), flush=True)
     settings.validate()
 
     chunks_by_type = {
@@ -149,15 +156,17 @@ def main():
             ids.append(metadata["chunk_id"])
             documents.append(chunk["content"])
             metadatas.append(metadata)
-
+    print(f"Data dir: {settings.data_dir}", flush=True)
+    print(f"Persist dir: {settings.chroma_persist_dir}", flush=True)
     embeddings = get_embeddings()
     vectors: list[list[float]] = []
     for start in range(0, len(documents), BATCH_SIZE):
         vectors.extend(embeddings.embed_documents(documents[start : start + BATCH_SIZE]))
-
+    print("Creating embeddings...", flush=True)
     collection = get_collection()
+    print("Opening Chroma collection...", flush=True)
     collection.upsert(ids=ids, embeddings=vectors, documents=documents, metadatas=metadatas)
-
+    print(f"Upserting {len(documents)} documents...", flush=True)
     breakdown = ", ".join(f"{content_type}={len(chunks)}" for content_type, chunks in chunks_by_type.items())
     print(
         f"Ingested {len(documents)} chunks into '{settings.chroma_collection_name}' "
