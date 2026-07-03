@@ -1,7 +1,11 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+# 1. ADD THIS IMPORT HERE 🌐
+from fastapi.middleware.cors import CORSMiddleware 
 from langchain_core.messages import AIMessage, HumanMessage
+from supabase import create_client, Client
 
 from app.config import settings
 from app.models import (
@@ -22,6 +26,16 @@ from app.nodes.response_node import build_response_graph
 from app.nodes.safety_node import build_safety_graph
 from app.nodes.understanding_node import build_understanding_graph
 from app.rag.chain import build_chain
+
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing Supabase environment variables!")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 MAX_HISTORY_TURNS = 6
 
@@ -52,24 +66,50 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Manasi - ManaScience RAG Chatbot", lifespan=lifespan)
 
 
+origins = [
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
+    "http://192.168.29.34:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     if chat_chain is None:
         raise HTTPException(status_code=503, detail="Chatbot is still starting up")
 
-    history = session_histories.setdefault(request.session_id, [])
+    # 1. Safely validate that session_id exists and isn't empty
+    if not request.session_id or request.session_id.strip() == "":
+        raise HTTPException(status_code=422, detail="A valid session_id/user_id must be provided")
 
-    result = chat_chain.invoke({"input": request.message, "chat_history": history})
+    # 2. Fetch user's existing history securely
+    response = supabase.table("user_chat_histories") \
+        .select("history") \
+        .eq("user_id", request.session_id) \
+        .execute()
+    
+    # 🔥 FIXED: Safe check preventing IndexError on new sessions
+    paired_history = response.data[0]["history"] if (response.data and len(response.data) > 0) else []
+    
+    # 3. Convert array structures back into LangChain elements
+    langchain_history = _convert_structured_to_langchain(paired_history)
 
-    history.append(HumanMessage(content=request.message))
-    history.append(AIMessage(content=result["answer"]))
-    session_histories[request.session_id] = history[-(MAX_HISTORY_TURNS * 2) :]
+    # 4. Invoke your core RAG chain
+    result = chat_chain.invoke({"input": request.message, "chat_history": langchain_history})
 
+    # 5. Extract context chunks and evaluate CTA Nodes
     sources = [
         SourceChunk(source=doc.metadata.get("source", "unknown"), content=doc.page_content)
         for doc in result.get("context", [])
@@ -77,8 +117,49 @@ def chat(request: ChatRequest):
     cta_result = cta_node(
         {"user_message": request.message, "understanding": None, "safety": {"safe_response": result["answer"]}}
     )["cta"]
+    
+    # Assemble the newest structural object
+    new_turn = {
+        "question": request.message,
+        "answer": result["answer"],
+        "cta": cta_result
+    }
+    paired_history.append(new_turn)
+    
+    # Keep historical logs constrained to your max boundary limit
+    paired_history = paired_history[-MAX_HISTORY_TURNS:]
+
+    # 6. Upsert back to Supabase using user_id securely
+    supabase.table("user_chat_histories").upsert({
+        "user_id": request.session_id,  
+        "history": paired_history,
+        "updated_at": "now()"
+    }).execute()
+
     return ChatResponse(answer=result["answer"], sources=sources, cta=CTAResponse(**cta_result))
 
+
+@app.get("/chat/{session_id}/history")
+def get_chat_history(session_id: str):
+    """
+    Retrieves conversational history records straight from the 
+    Supabase user database table based on their unique authenticated profile ID.
+    """
+    # 1. Fetch data directly from the Supabase table using the user_id column
+    response = supabase.table("user_chat_histories") \
+        .select("history") \
+        .eq("user_id", session_id) \
+        .execute()
+        
+   
+    # 2. Extract paired data array safely if record entries exist
+    paired_history = response.data[0]["history"] if (response.data and len(response.data) > 0) else []
+    
+    return {
+        "session_id": session_id,
+        "history": paired_history,
+        "total_turns": len(paired_history)
+    }
 
 @app.delete("/chat/{session_id}")
 def reset_session(session_id: str):
@@ -93,6 +174,14 @@ def _history_to_chat_turns(history: list) -> list[dict]:
         for msg in history
     ]
 
+
+def _convert_structured_to_langchain(paired_history: list[dict]) -> list:
+    """Helper to convert your structured DB array back into LangChain Message objects."""
+    flat_messages = []
+    for turn in paired_history:
+        flat_messages.append(HumanMessage(content=turn.get("question", "")))
+        flat_messages.append(AIMessage(content=turn.get("answer", "")))
+    return flat_messages
 
 @app.post("/understand", response_model=UnderstandResponse)
 def understand(request: ChatRequest):
@@ -183,6 +272,25 @@ def safety(request: ChatRequest):
     )
     return SafetyResponse(**result["safety"])
 
+
+@app.get("/chat/{session_id}/history")
+def get_chat_history(session_id: str):
+    """
+    Retrieves the parsed, chronological message history for a specific session ID.
+    If the session does not exist, returns an empty list.
+    """
+    # 1. Fetch the raw LangChain message list from memory
+    history = session_histories.get(session_id, [])
+    
+    # 2. Re-use your helper to transform LangChain objects to JSON-ready dicts
+    formatted_history = _history_to_chat_turns(history)
+    
+    # 3. Return the payload structured for your Postman testing suite
+    return {
+        "session_id": session_id,
+        "history": formatted_history,
+        "total_turns": len(formatted_history) // 2  # Optional metric for tracking
+    }
 
 @app.post("/cta", response_model=CTAResponse)
 def cta(request: ChatRequest):
