@@ -27,6 +27,8 @@ complete profile. When a question needs personalized or clinical guidance, gentl
 point the user toward ManaScience's human-reviewed Personalized Roadmap and its carefully \
 selected practitioners.
 
+{roadmap_context}
+
 Context:
 {context}"""
 

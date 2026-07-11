@@ -258,7 +258,7 @@ def generate_response(
     return {
         "answer": answer,
         "source": source,
-        "answer_type": ANSWER_TYPE_BY_INTENT[intent],
+        "answer_type": ANSWER_TYPE_BY_INTENT.get(intent, "general_knowledge"),
         "topic": understanding["topic"],
         "intent": intent,
         "confidence": knowledge["confidence"],

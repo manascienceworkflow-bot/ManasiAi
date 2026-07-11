@@ -180,22 +180,36 @@ def knowledge_node(state: GraphState, retriever: Optional[Any] = None) -> dict:
         result["retrieval_time_ms"] = (time.monotonic() - start) * 1000
         return {"knowledge": KnowledgeOutput.model_validate(result).model_dump()}
 
-    source, confidence, relevant = _decide_source(scored_chunks)
-    retrieved_docs = _aggregate_and_cap(relevant) if source == "rag" else []
+    # Aggregation + validation are wrapped too: a retrieved chunk with a missing
+    # or unrecognized content_type would otherwise raise a ValidationError out of
+    # the node (a 500), unlike every other node which degrades gracefully. On any
+    # such failure, fall back to an llm-source result instead of crashing.
+    try:
+        source, confidence, relevant = _decide_source(scored_chunks)
+        retrieved_docs = _aggregate_and_cap(relevant) if source == "rag" else []
 
-    result = {
-        "source": source,
-        "retrieved_docs": retrieved_docs,
-        "confidence": confidence,
-        "query_used": understanding["search_query"],
-        "intent": understanding["intent"],
-        "retrieval_skipped": False,
-        "content_types_searched": content_types_searched,
-        "error": None,
-    }
-    result["retrieval_time_ms"] = (time.monotonic() - start) * 1000
+        result = {
+            "source": source,
+            "retrieved_docs": retrieved_docs,
+            "confidence": confidence,
+            "query_used": understanding["search_query"],
+            "intent": understanding["intent"],
+            "retrieval_skipped": False,
+            "content_types_searched": content_types_searched,
+            "error": None,
+        }
+        result["retrieval_time_ms"] = (time.monotonic() - start) * 1000
 
-    validated = KnowledgeOutput.model_validate(result).model_dump()
+        validated = KnowledgeOutput.model_validate(result).model_dump()
+    except Exception as exc:
+        logger.error(
+            "knowledge_node_processing_failure: query=%r error=%s",
+            understanding["search_query"], exc,
+        )
+        result = _error_result(understanding, error="malformed_retrieval")
+        result["retrieval_time_ms"] = (time.monotonic() - start) * 1000
+        return {"knowledge": KnowledgeOutput.model_validate(result).model_dump()}
+
     logger.info(
         "knowledge_node ok: query=%r source=%s confidence=%.2f elapsed_ms=%.1f",
         understanding["search_query"],
