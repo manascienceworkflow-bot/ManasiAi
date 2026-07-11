@@ -32,9 +32,9 @@ class RetrievedDocument(TypedDict):
         "blog",
         "research_article",
         "faq",
-        "practit_info",
-        "websitioner_info",
-        "therapye_content",
+        "practitioner_info",
+        "therapy_info",
+        "website_content",
         "neuroplasticity_content",
         "pdf_document",
     ]

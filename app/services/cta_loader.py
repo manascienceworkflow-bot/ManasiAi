@@ -180,7 +180,7 @@ def _parse_grouped_bullets(body: list[str]) -> tuple[list[str], dict[str, list[s
                 flat.append(example)
                 seen.add(example)
 
-    if current_group == "_default" and not groups.get("_default"):
+    if set(groups) <= {"_default"}:
         groups = {}  # no real subheadings were ever seen -- pure flat-list file
     return flat, groups
 

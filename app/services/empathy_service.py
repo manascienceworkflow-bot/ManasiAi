@@ -107,7 +107,15 @@ def _significant_tokens(text: str) -> set[str]:
     comparison. A deliberately coarse proxy for 'load-bearing facts' -- precise
     semantic fact-checking is out of scope for a mechanical guard."""
     numbers = re.findall(r"\d+(?:\.\d+)?%?", text)
-    proper_nouns = re.findall(r"(?<!^)(?<!\. )\b[A-Z][a-zA-Z]{3,}\b", text)
+    # Exclude ordinary sentence-initial capitalization after ". "/"? "/"! " or a
+    # paragraph-break newline (LLM prose uses "\n" between paragraphs, not just
+    # ". "). Mirrors hallucination_validator; without the fuller exclusion, words
+    # that merely start a sentence are miscounted as load-bearing facts.
+    proper_nouns = re.findall(
+        r"(?<!^)(?<!\. )(?<!\.\n)(?<!\? )(?<!\?\n)(?<!\! )(?<!\!\n)(?<!\n)"
+        r"\b[A-Z][a-zA-Z]{3,}\b",
+        text,
+    )
     return {tok.lower() for tok in numbers + proper_nouns}
 
 
@@ -167,7 +175,9 @@ def _corrective_suffix_for(answer: str, final_answer: str) -> str:
 
 
 def _build_prompt(answer: str, emotional_state: str, extra_suffix: str = "") -> str:
-    tone_instructions = EMOTIONAL_TONE_INSTRUCTIONS[emotional_state]
+    tone_instructions = EMOTIONAL_TONE_INSTRUCTIONS.get(
+        emotional_state, EMOTIONAL_TONE_INSTRUCTIONS["neutral"]
+    )
     prompt = (
         _PROMPT_TEMPLATE.replace("{{emotional_state}}", emotional_state)
         .replace("{{emotional_tone_instructions}}", tone_instructions)

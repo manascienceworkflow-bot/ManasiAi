@@ -1,3 +1,5 @@
+import re
+
 UNSUPPORTED_DOMAIN_KEYWORDS = [
     "python", "javascript", "programming language", "source code", "software bug",
     "cryptocurrency", "bitcoin", "ethereum", "blockchain", "nft",
@@ -30,7 +32,12 @@ def fails_domain_boundary(final_answer: str, topic: str) -> bool:
     keywords (e.g. a sensory-processing answer that drifts into stock-market
     advice), so `topic` must never suppress this scan."""
     lowered = final_answer.lower()
-    return any(keyword in lowered for keyword in UNSUPPORTED_DOMAIN_KEYWORDS)
+    # Word-boundary match so a keyword can't fire inside a larger word --
+    # e.g. "election" must not match "practitioner selection"/"course selection".
+    return any(
+        re.search(r"\b" + re.escape(keyword) + r"\b", lowered)
+        for keyword in UNSUPPORTED_DOMAIN_KEYWORDS
+    )
 
 
 def has_supported_domain_content(final_answer: str) -> bool:

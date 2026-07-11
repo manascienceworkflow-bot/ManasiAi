@@ -9,7 +9,7 @@ API_BASE_URL = os.getenv("MANASI_API_URL", "http://localhost:8000")
 st.set_page_config(page_title="Manasi — ManaScience AI Guide", page_icon="🧠")
 
 if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.session_id = "8eb39625-c719-4456-a5d7-a19871e3150a"
 if "messages" not in st.session_state:
     st.session_state.messages = []
 

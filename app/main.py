@@ -1,12 +1,13 @@
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware 
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
-from supabase import create_client, Client
 
 from app.config import settings
+from app.db import supabase
+from app.roadmap import services as roadmap_services
+from app.roadmap.routes import router as roadmap_router
 from app.models import (
     AnswerResponse,
     ChatRequest,
@@ -25,14 +26,6 @@ from app.nodes.response_node import build_response_graph
 from app.nodes.safety_node import build_safety_graph
 from app.nodes.understanding_node import build_understanding_graph
 from app.rag.chain import build_chain
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Missing Supabase environment variables!")
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 MAX_HISTORY_TURNS = 6
 
@@ -79,6 +72,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(roadmap_router)
+
 
 @app.get("/health")
 def health():
@@ -104,8 +99,18 @@ def chat(request: ChatRequest):
     # Convert database turns back into LangChain element classes
     langchain_history = _convert_structured_to_langchain(paired_history)
 
+    # Read-only roadmap context for this user (empty string when none on file);
+    # fails safe so a roadmap lookup can never break a chat turn.
+    roadmap_context = roadmap_services.get_roadmap_context_text(request.session_id, supabase)
+
     # Invoke our central RAG chain pipeline
-    result = chat_chain.invoke({"input": request.message, "chat_history": langchain_history})
+    result = chat_chain.invoke(
+        {
+            "input": request.message,
+            "chat_history": langchain_history,
+            "roadmap_context": roadmap_context,
+        }
+    )
 
     sources = [
         SourceChunk(source=doc.metadata.get("source", "unknown"), content=doc.page_content)
