@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware 
 from langchain_core.messages import AIMessage, HumanMessage
-from postgrest.exceptions import APIError
 from supabase import create_client, Client
 
 from app.config import settings
