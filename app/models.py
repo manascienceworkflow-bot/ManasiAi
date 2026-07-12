@@ -1,9 +1,11 @@
 from pydantic import BaseModel, Field
+from typing import Optional
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="The user's question")
     session_id: str = Field(default="default", description="Conversation session identifier")
+    user_id: Optional[str] = None
 
 
 class SourceChunk(BaseModel):

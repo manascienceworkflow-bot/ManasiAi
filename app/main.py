@@ -27,6 +27,9 @@ from app.nodes.safety_node import build_safety_graph
 from app.nodes.understanding_node import build_understanding_graph
 from app.rag.chain import build_chain
 
+from pydantic import BaseModel
+from typing import Optional
+
 MAX_HISTORY_TURNS = 6
 
 chat_chain = None
@@ -79,31 +82,28 @@ app.include_router(roadmap_router)
 def health():
     return {"status": "ok"}
 
-
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest):
     if chat_chain is None:
         raise HTTPException(status_code=503, detail="Chatbot is still starting up")
 
     if not request.session_id or request.session_id.strip() == "":
-        raise HTTPException(status_code=422, detail="A valid session_id/user_id must be provided")
+        raise HTTPException(status_code=422, detail="A valid session_id must be provided")
 
-    # Fetch user's existing history securely from Supabase
+    # 1. Fetch individual history matching the session_id row
     response = supabase.table("user_chat_histories") \
-        .select("history") \
-        .eq("user_id", request.session_id) \
+        .select("history, user_id") \
+        .eq("session_id", request.session_id.strip()) \
         .execute()
-    
-    paired_history = response.data[0]["history"] if (response.data and len(response.data) > 0) else []
-    
-    # Convert database turns back into LangChain element classes
-    langchain_history = _convert_structured_to_langchain(paired_history)
+        
+    db_record = response.data[0] if (response.data and len(response.data) > 0) else None
+    paired_history = db_record["history"] if db_record else []
 
-    # Read-only roadmap context for this user (empty string when none on file);
-    # fails safe so a roadmap lookup can never break a chat turn.
+    # 2. Extract Langchain components
+    langchain_history = _convert_structured_to_langchain(paired_history)
     roadmap_context = roadmap_services.get_roadmap_context_text(request.session_id, supabase)
 
-    # Invoke our central RAG chain pipeline
+    # 3. Process Prompt Chain Execution
     result = chat_chain.invoke(
         {
             "input": request.message,
@@ -120,55 +120,135 @@ def chat(request: ChatRequest):
         {"user_message": request.message, "understanding": None, "safety": {"safe_response": result["answer"]}}
     )["cta"]
     
-    # Structure newest conversation payload turn
     new_turn = {
         "question": request.message,
         "answer": result["answer"],
         "cta": cta_result
     }
     paired_history.append(new_turn)
-    paired_history = paired_history[-MAX_HISTORY_TURNS:]
 
-    # Save to Supabase
-    supabase.table("user_chat_histories").upsert({
-        "user_id": request.session_id,  
-        "history": paired_history,
-        "updated_at": "now()"
-    }).execute()
+  # 4. Infer user payload identity
+    # Look at existing database entry first; fallback to incoming request parameter if row is missing
+    current_user_id = db_record["user_id"] if db_record else None
+    if not current_user_id and request.user_id and request.user_id.strip() != "":
+        current_user_id = request.user_id.strip()
     
-    # Keep the backup state updated for workflow downstream endpoints (/understand, /cta, etc.)
-    session_histories[request.session_id] = langchain_history + [
-        HumanMessage(content=request.message), 
-        AIMessage(content=result["answer"])
-    ]
+    # Update title dynamically for the first turn to mirror real chat applications
+    derived_title = f"Chat: {request.message[:25]}..." if len(paired_history) <= 1 else (db_record.get("title") if db_record else "New Assessment/Chat")
 
+    # 5. Upsert tracking details matching session_id
+    upsert_payload = {
+        "session_id": request.session_id.strip(),
+        "history": paired_history,
+        "title": derived_title,
+        "updated_at": "now()"
+    }
+    
+    # This block now catches the user_id correctly on the first message send turn!
+    if current_user_id:
+        upsert_payload["user_id"] = current_user_id
+
+    supabase.table("user_chat_histories").upsert(upsert_payload, on_conflict="session_id").execute()
+    
     return ChatResponse(answer=result["answer"], sources=sources, cta=CTAResponse(**cta_result))
 
 
-@app.get("/chat/{session_id}/history")
-def get_chat_history(session_id: str):
-    """
-    Retrieves conversational history records straight from the 
-    Supabase user database table based on their unique authenticated profile ID.
-    """
+class SaveTurnRequest(BaseModel):
+    session_id: str
+    user_id: Optional[str] = None
+    question: str
+    answer: str
+
+@app.post("/chat/save_turn")
+def save_turn(request: SaveTurnRequest):
+    if not request.session_id or request.session_id.strip() == "":
+        raise HTTPException(status_code=422, detail="A valid session_id must be provided")
+
+    # 1. Fetch current history matching the session row token
     response = supabase.table("user_chat_histories") \
-        .select("history") \
-        .eq("user_id", session_id) \
+        .select("history, title, user_id") \
+        .eq("session_id", request.session_id.strip()) \
         .execute()
         
-    paired_history = response.data[0]["history"] if (response.data and len(response.data) > 0) else []
-    
+    db_record = response.data[0] if (response.data and len(response.data) > 0) else None
+    paired_history = db_record["history"] if db_record else []
+
+    # 2. Append the quiz turn trace layout
+    new_turn = {
+        "question": request.question,
+        "answer": request.answer,
+        "cta": None
+    }
+    paired_history.append(new_turn)
+
+    # 3. Determine identity reference points
+    resolved_uid = db_record["user_id"] if db_record else request.user_id
+    derived_title = db_record.get("title") if db_record else "Roadmap Assessment"
+
+    # 4. Save/Commit back down to Supabase
+    upsert_payload = {
+        "session_id": request.session_id.strip(),
+        "history": paired_history,
+        "title": derived_title,
+        "updated_at": "now()"
+    }
+    if resolved_uid:
+        upsert_payload["user_id"] = resolved_uid
+
+    supabase.table("user_chat_histories").upsert(upsert_payload, on_conflict="session_id").execute()
+    return {"status": "saved"}
+
+@app.get("/chat/user/{user_id}/history")
+def get_user_chat_history_list(user_id: str):
+    """
+    Sidebar Loader: Retrieves all distinct chat conversation sessions 
+    belonging to a specific authenticated profile.
+    """
+    response = supabase.table("user_chat_histories") \
+        .select("session_id, title, history, updated_at") \
+        .eq("user_id", user_id) \
+        .order("updated_at", desc=True) \
+        .execute()
+        
+    return {
+        "user_id": user_id,
+        "history_records": response.data if response.data else []
+    }
+
+
+@app.get("/chat/session/{session_id}")
+def get_single_session_history(session_id: str):
+    """
+    Window Loader: Retrieves a singular specific chat session record 
+    (Works for loading an active conversation window).
+    """
+    response = supabase.table("user_chat_histories") \
+        .select("session_id, title, history, updated_at, user_id") \
+        .eq("session_id", session_id) \
+        .execute()
+        
     return {
         "session_id": session_id,
-        "history": paired_history,
-        "total_turns": len(paired_history)
+        "record": response.data[0] if (response.data and len(response.data) > 0) else None
     }
 
 
 @app.delete("/chat/{session_id}")
 def reset_session(session_id: str):
+    """
+    Deletes a specific conversation thread from both the live cache 
+    and the permanent Supabase database records.
+    """
+    # 1. Clear the local transient server memory chunk
     session_histories.pop(session_id, None)
-    return {"status": "reset", "session_id": session_id}
+    
+    # 2. Delete the row directly from Supabase so it drops off the frontend sidebar
+    supabase.table("user_chat_histories") \
+        .delete() \
+        .eq("session_id", session_id) \
+        .execute()
+        
+    return {"status": "deleted", "session_id": session_id}
 
 
 def _history_to_chat_turns(history: list) -> list[dict]:
@@ -176,8 +256,7 @@ def _history_to_chat_turns(history: list) -> list[dict]:
         {"role": "user" if isinstance(msg, HumanMessage) else "assistant", "content": msg.content}
         for msg in history
     ]
-
-
+    
 def _convert_structured_to_langchain(paired_history: list[dict]) -> list:
     flat_messages = []
     for turn in paired_history:
