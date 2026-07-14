@@ -11,6 +11,7 @@ from app.roadmap.services import (  # noqa: E402
     get_roadmap_context_text,
     submit_roadmap,
 )
+from app.roadmap.severity_filter import MAX_DOMAINS  # noqa: E402
 
 
 class _Result:
@@ -85,6 +86,10 @@ def test_submit_persists_and_acks():
         "classification": "ND",
         "domains_received": 1,
         "context_ready": True,
+        # Step 2: the single moderate domain is actionable.
+        "domains_actionable": 1,
+        "domains_filtered_out": 0,
+        "filter_warnings": [],
     }
     assert fake.table_names == [ROADMAP_TABLE]
     row = fake.upserted[0]
@@ -92,6 +97,61 @@ def test_submit_persists_and_acks():
     assert row["classification"] == "ND"
     # Score preserved verbatim in the stored raw payload.
     assert row["raw"]["score"][0]["Score"] == "72%"
+
+
+def _multi_payload(*severities):
+    return [
+        {
+            "user_id": "u_demo",
+            "Classification": "neurodivergent",
+            "score": [
+                {"domain": f"domain_{i}", "Score": 50, "Severity": sev}
+                for i, sev in enumerate(severities)
+            ],
+        }
+    ]
+
+
+def test_submit_ack_carries_the_step2_filter_counts():
+    fake = FakeSupabase()
+    ack = submit_roadmap(_multi_payload("High", "Low", "Moderate"), fake)
+    assert ack["domains_received"] == 3
+    assert ack["domains_actionable"] == 2
+    assert ack["domains_filtered_out"] == 1
+    assert ack["filter_warnings"] == []
+
+
+def test_submit_stores_the_full_result_not_the_filtered_view():
+    """The filter is a derived view. All three domains -- including the Low one --
+    are still persisted; Step 2 narrows what flows DOWNSTREAM, not what is stored."""
+    fake = FakeSupabase()
+    submit_roadmap(_multi_payload("High", "Low", "Moderate"), fake)
+    assert len(fake.upserted[0]["result"]["scores"]) == 3
+
+
+def test_submit_succeeds_when_no_domain_is_actionable():
+    fake = FakeSupabase()
+    ack = submit_roadmap(_multi_payload("Low", "Low"), fake)
+    assert ack["status"] == "accepted"
+    assert ack["domains_actionable"] == 0
+    assert ack["context_ready"] is True
+    assert fake.upserted  # still persisted
+
+
+def test_submit_surfaces_filter_warnings_for_an_unknown_severity():
+    fake = FakeSupabase()
+    ack = submit_roadmap(_multi_payload("High", "Severe"), fake)
+    assert ack["domains_actionable"] == 1
+    assert len(ack["filter_warnings"]) == 1
+    assert "Severe" in ack["filter_warnings"][0]
+
+
+def test_submit_rejects_an_oversized_score_array_without_persisting():
+    fake = FakeSupabase()
+    with pytest.raises(RoadmapValidationError) as exc:
+        submit_roadmap(_multi_payload(*(["High"] * (MAX_DOMAINS + 1))), fake)
+    assert exc.value.code == "payload_too_large"
+    assert fake.upserted == []
 
 
 def test_submit_rejects_bad_payload_without_persisting():
