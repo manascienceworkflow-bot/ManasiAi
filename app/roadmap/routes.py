@@ -28,8 +28,11 @@ async def submit(request: Request) -> RoadmapSubmitResponse:
         ack = submit_roadmap(payload, supabase)
     except RoadmapValidationError as exc:
         logger.info("roadmap submit rejected: code=%s field=%s", exc.code, exc.field)
+        # An oversized score array is a payload-size problem, not a schema one --
+        # a 422 would tell the frontend to fix fields that are perfectly valid.
+        status_code = 413 if exc.code == "payload_too_large" else 422
         raise HTTPException(
-            status_code=422,
+            status_code=status_code,
             detail={"status": "rejected", "error": {"code": exc.code, "message": exc.message, "field": exc.field}},
         ) from exc
     except Exception as exc:
