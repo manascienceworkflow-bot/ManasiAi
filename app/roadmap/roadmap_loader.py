@@ -105,9 +105,11 @@ def _parse_scores(value: object) -> list[RoadmapDomainScore]:
                 f"score[{i}].Score",
             )
         severity = entry.get("Severity")
+        domain_type = entry.get("domain_type")
         parsed.append(
             RoadmapDomainScore(
                 domain=domain.strip(),
+                domain_type=str(domain_type) if domain_type is not None else None,
                 score=raw_score,
                 severity=str(severity) if severity is not None else None,
             )

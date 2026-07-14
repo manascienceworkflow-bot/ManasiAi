@@ -11,6 +11,7 @@ class RoadmapDomainScore(BaseModel):
     as a string ("72%"), and we preserve whichever arrived."""
 
     domain: str
+    domain_type: Optional[str] = None
     score: str | float | int
     severity: Optional[str] = None
 
