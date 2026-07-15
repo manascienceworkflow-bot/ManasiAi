@@ -171,6 +171,7 @@ def filter_by_severity(
             if rank > incumbent.severity_rank:
                 kept[slot] = FilteredDomainScore(
                     domain=entry.domain,
+                    domain_type=entry.domain_type,
                     score=entry.score,
                     severity=entry.severity,
                     severity_key=key,
@@ -222,6 +223,7 @@ def filter_by_severity(
         kept.append(
             FilteredDomainScore(
                 domain=entry.domain,
+                domain_type=entry.domain_type,
                 score=entry.score,
                 severity=entry.severity,
                 severity_key=key,

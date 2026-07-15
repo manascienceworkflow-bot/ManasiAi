@@ -68,10 +68,11 @@ def _bundle(nd_rows=(), nt_rows=()):
 _RANK = {"high": 3, "moderate": 2}
 
 
-def _score(domain, severity="High"):
+def _score(domain, severity="High", domain_type=None):
     key = severity.strip().casefold()
     return FilteredDomainScore(
         domain=domain,
+        domain_type=domain_type,
         score=80,
         severity=severity,
         severity_key=key,
@@ -186,13 +187,57 @@ def test_u10_to_list_shape():
         _bundle(nd_rows=_ND_ROWS),
     )
     assert out.to_list() == [
-        {"domain": "Sensory Processing", "severity": "High",
+        {"domain": "Sensory Processing", "domain_type": None, "severity": "High",
          "therapies": [{"therapy": "MNRI", "relevance": "Primary"},
                        {"therapy": "Feldenkrais", "relevance": "Secondary"}]},
-        {"domain": "Cognitive Function", "severity": "Moderate",
+        {"domain": "Cognitive Function", "domain_type": None, "severity": "Moderate",
          "therapies": [{"therapy": "Arrowsmith", "relevance": "Primary"},
                        {"therapy": "Stowell", "relevance": "Secondary"}]},
     ]
+
+
+def test_domain_type_carried_verbatim():
+    """The frontend's per-domain `domain_type` flows through the mapper verbatim --
+    onto DomainTherapyMapping and into the to_list() JSON -- and is never used for
+    matching (the therapies are unchanged from the no-domain_type case)."""
+    out = map_domains_to_therapies(
+        _filtered(_score("Sensory Processing", "High", domain_type="Spine")),
+        _bundle(nd_rows=_ND_ROWS),
+    )
+    assert out.mappings[0].domain_type == "Spine"
+    assert out.to_list() == [
+        {"domain": "Sensory Processing", "domain_type": "Spine", "severity": "High",
+         "therapies": [{"therapy": "MNRI", "relevance": "Primary"},
+                       {"therapy": "Feldenkrais", "relevance": "Secondary"}]},
+    ]
+
+
+def test_domain_type_is_the_frontend_value_never_the_excel_track():
+    """domain_type must be preserved exactly as received -- NOT inferred from the
+    Excel `Track` column. Here the frontend sends domain_type='from_frontend' while
+    the matched Excel rows carry Track='Complementary'; the output must echo the
+    frontend value."""
+    rows = _rows(
+        ("A. Sensory Processing", "MNRI", "Primary", "Complementary"),  # Track != domain_type
+    )
+    out = map_domains_to_therapies(
+        _filtered(_score("Sensory Processing", "High", domain_type="from_frontend")),
+        _bundle(nd_rows=rows),
+    )
+    assert out.mappings[0].domain_type == "from_frontend"  # frontend value, not "Complementary"
+
+
+def test_domain_type_carried_onto_unmapped_domain():
+    """An actionable domain that matches nothing still carries its frontend
+    domain_type verbatim on the UnmappedDomain record."""
+    out = map_domains_to_therapies(
+        _filtered(_score("Telepathy", "High", domain_type="Spine")),
+        _bundle(nd_rows=_ND_ROWS),
+    )
+    assert out.mappings == ()
+    assert out.unmapped[0].domain == "Telepathy"
+    assert out.unmapped[0].domain_type == "Spine"
+    assert out.unmapped[0].reason == "domain_not_found"
 
 
 def test_u11_track_not_interpreted():

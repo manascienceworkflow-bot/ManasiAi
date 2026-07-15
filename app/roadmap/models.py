@@ -47,12 +47,15 @@ class RoadmapContext(TypedDict):
 
 class FilteredDomainScore(BaseModel):
     """One domain that SURVIVED the Step 2 severity filter, i.e. its severity is
-    High or Moderate. `domain`, `score`, and `severity` are carried VERBATIM from
-    the frontend (spec P1) -- `severity_key` is the normalized comparison key the
-    filter derived, exposed so downstream steps can branch on a canonical value
-    without re-implementing normalization."""
+    High or Moderate. `domain`, `domain_type`, `score`, and `severity` are carried
+    VERBATIM from the frontend (spec P1) -- `severity_key` is the normalized
+    comparison key the filter derived, exposed so downstream steps can branch on a
+    canonical value without re-implementing normalization. `domain_type` (the
+    frontend's per-domain classification, e.g. "Spine"/"Complementary") is Optional
+    and passed straight through to the therapy-mapping output."""
 
     domain: str
+    domain_type: Optional[str] = None
     score: str | float | int
     severity: Optional[str] = None
     severity_key: Literal["high", "moderate"]
