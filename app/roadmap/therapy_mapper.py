@@ -241,7 +241,12 @@ def map_domains_to_therapies(
                         domain=score.domain,
                     )
                 unmapped.append(
-                    UnmappedDomain(domain=score.domain, severity=score.severity, reason=reason)
+                    UnmappedDomain(
+                        domain=score.domain,
+                        domain_type=score.domain_type,
+                        severity=score.severity,
+                        reason=reason,
+                    )
                 )
                 continue
 
@@ -258,6 +263,7 @@ def map_domains_to_therapies(
             mappings.append(
                 DomainTherapyMapping(
                     domain=score.domain,
+                    domain_type=score.domain_type,
                     severity=score.severity,
                     matched_domain=group.display_name,
                     therapies=therapies,

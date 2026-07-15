@@ -36,17 +36,19 @@ class TherapyRef(BaseModel):
 class DomainTherapyMapping(BaseModel):
     """All therapies mapped to ONE matched actionable domain.
 
-    `domain` and `severity` are the INCOMING values (from the filtered
-    assessment), carried verbatim. `matched_domain` is the mapping-table label
-    that matched (e.g. "A. Sensory Processing") -- kept as provenance so a
-    consumer can see what the bare incoming "Sensory Processing" resolved to.
-    `therapies` are in mapping-table row order; duplicates are NOT removed and
-    the list is NOT ranked.
+    `domain`, `domain_type`, and `severity` are the INCOMING values (from the
+    filtered assessment), carried verbatim. `domain_type` is the frontend's
+    per-domain classification (e.g. "Spine"/"Complementary"), Optional and never
+    interpreted here. `matched_domain` is the mapping-table label that matched
+    (e.g. "A. Sensory Processing") -- kept as provenance so a consumer can see what
+    the bare incoming "Sensory Processing" resolved to. `therapies` are in
+    mapping-table row order; duplicates are NOT removed and the list is NOT ranked.
     """
 
     model_config = ConfigDict(frozen=True)
 
     domain: str
+    domain_type: Optional[str] = None
     severity: Optional[str] = None
     matched_domain: str
     therapies: tuple[TherapyRef, ...]
@@ -56,12 +58,16 @@ class UnmappedDomain(BaseModel):
     """An actionable domain that produced NO therapies, with the reason.
 
     Recorded rather than silently dropped (principle P5) so a caller can observe
-    every actionable domain's fate. `domain`/`severity` are the incoming values.
+    every actionable domain's fate. `domain`/`domain_type`/`severity` are the
+    incoming values, carried verbatim. `domain_type` is the frontend's per-domain
+    classification -- preserved exactly as received, never inferred from the Excel
+    `Track` column (an unmatched domain has no Excel row to derive it from anyway).
     """
 
     model_config = ConfigDict(frozen=True)
 
     domain: str
+    domain_type: Optional[str] = None
     severity: Optional[str] = None
     reason: Literal["domain_not_found", "empty_dataset"]
 
@@ -103,10 +109,12 @@ class DomainTherapyResult(BaseModel):
     diagnostics: TherapyMappingDiagnostics
 
     def to_list(self) -> list[dict]:
-        """The brief's exact JSON shape -- matched domains only."""
+        """The thin JSON view -- matched domains only. Extends the brief's shape
+        with the frontend's `domain_type` (carried verbatim)."""
         return [
             {
                 "domain": m.domain,
+                "domain_type": m.domain_type,
                 "severity": m.severity,
                 "therapies": [
                     {"therapy": t.therapy, "relevance": t.relevance}

@@ -415,6 +415,27 @@ def test_a_string_percentage_score_survives_verbatim():
     assert out.filtered_scores[0].score == "72%"
 
 
+def test_domain_type_carried_through_the_filter():
+    """The frontend's `domain_type` survives severity filtering verbatim so Step 2
+    can echo it -- on both the plain keep path and the dedup-winner path."""
+    out = filter_by_severity(
+        _result(
+            {"domain": "A", "domain_type": "Spine", "score": 50, "severity": "High"},
+        )
+    )
+    assert out.filtered_scores[0].domain_type == "Spine"
+
+    # Dedup: the higher-severity entry wins and carries ITS domain_type.
+    deduped = filter_by_severity(
+        _result(
+            {"domain": "A", "domain_type": "loser", "score": 50, "severity": "Moderate"},
+            {"domain": "A", "domain_type": "winner", "score": 90, "severity": "High"},
+        )
+    )
+    assert len(deduped.filtered_scores) == 1
+    assert deduped.filtered_scores[0].domain_type == "winner"
+
+
 def test_module_has_no_framework_or_io_dependencies():
     """The filter must stay pure: no FastAPI, no Supabase, no LLM, no db."""
     source = Path(__file__).resolve().parent.parent / "app" / "roadmap" / "severity_filter.py"
