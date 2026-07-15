@@ -1,8 +1,11 @@
 import logging
 
 from app.roadmap.context_builder import build_context, empty_context, render_context_text
+from app.roadmap.mapping_loader import get_mappings
 from app.roadmap.roadmap_loader import load_roadmap
+from app.roadmap.serializers import MappedTherapyResponse, build_mapped_response
 from app.roadmap.severity_filter import filter_by_severity
+from app.roadmap.therapy_mapper import map_domains_to_therapies
 
 logger = logging.getLogger("app.roadmap.services")
 
@@ -52,6 +55,40 @@ def submit_roadmap(payload, supabase) -> dict:
         "domains_filtered_out": filtered.diagnostics.total_dropped,
         "filter_warnings": filtered.diagnostics.warnings,
     }
+
+
+def map_roadmap_therapies(payload) -> MappedTherapyResponse:
+    """Run the completed Domain -> Therapy pipeline on a frontend payload and
+    return the serialized response for the dashboard.
+
+    Composes the EXISTING pipeline in order and adds no business logic:
+      load_roadmap -> filter_by_severity -> get_mappings -> map_domains_to_therapies
+    then flattens the result via the serialization layer. STATELESS -- unlike
+    submit_roadmap this neither reads nor writes Supabase; it is a pure function of
+    the request body, safe to retry.
+
+    Both the severity filter and the therapy mapper run in their non-strict
+    (production) posture: unknown/missing severities and unmatched domains are
+    dropped/recorded, never raised. `get_mappings()` (not `load_mappings()`) is
+    used so the Excel workbooks are read once and cached at module level.
+
+    Raises RoadmapValidationError (bad payload -> 422/413), MappingLoadError
+    (Excel data unavailable -> 500), or TherapyMappingError (-> 500); the route is
+    the single place these map to HTTP status codes."""
+    result = load_roadmap(payload)                          # Step 1
+    filtered = filter_by_severity(result)                   # Step 2 (strict=False)
+    bundle = get_mappings()                                 # cached Excel load
+    mapped = map_domains_to_therapies(filtered, bundle)     # Step 3 (strict=False)
+
+    logger.info(
+        "map_roadmap_therapies: user_id=%s classification=%s actionable=%d mapped=%d unmapped=%d",
+        result.user_id,
+        result.classification,
+        filtered.diagnostics.total_kept,
+        mapped.diagnostics.total_mapped,
+        mapped.diagnostics.total_unmapped,
+    )
+    return build_mapped_response(filtered, mapped)
 
 
 def get_roadmap_context_text(user_id: str, supabase) -> str:
