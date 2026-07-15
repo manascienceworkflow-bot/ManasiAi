@@ -59,6 +59,11 @@ class Settings:
 
     cta_data_dir: Path = BASE_DIR / os.getenv("CTA_DATA_DIR", "data/cta")
 
+    # Roadmap therapy-mapping source workbooks (Neurodivergent_map.xlsx /
+    # Neurotypical_map.xlsx). Read-only reference data consumed by the roadmap
+    # mapping loader; never written to.
+    roadmap_mapping_dir: Path = BASE_DIR / os.getenv("ROADMAP_MAPPING_DIR", "data/roadmap")
+
     def validate(self) -> None:
         if not self.openai_api_key:
             raise RuntimeError(
