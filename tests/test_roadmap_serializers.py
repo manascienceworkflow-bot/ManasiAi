@@ -267,3 +267,46 @@ def test_classification_carried_from_mapper():
         filtered = _filtered([_filtered_score("A", 1)], classification=cls)
         mapped = _mapped([_mapping("A", [_therapy("t", "Primary", 5)])], classification=cls)
         assert build_mapped_response(filtered, mapped).classification == cls
+
+
+# --------------------------------------------------------------------------
+# U15 -- aggregated_therapies is emitted and consistent with mapped_domains
+# --------------------------------------------------------------------------
+
+
+def test_aggregated_therapies_transposes_mapped_domains():
+    # MNRI recommended by two domains, Feldenkrais by one.
+    filtered = _filtered([
+        _filtered_score("Sensory Processing", 85),
+        _filtered_score("Body Awareness", 70, severity="Moderate", key="moderate", rank=2),
+    ])
+    mapped = _mapped([
+        _mapping("Sensory Processing", [_therapy("MNRI", "Primary", 5), _therapy("Feldenkrais", "Secondary", 6)]),
+        _mapping("Body Awareness", [_therapy("MNRI", "Secondary", 7)]),
+    ])
+
+    resp = build_mapped_response(filtered, mapped)
+
+    # mapped_domains is untouched (still lists MNRI twice, once per domain).
+    assert [t.therapy for d in resp.mapped_domains for t in d.therapies] == [
+        "MNRI", "Feldenkrais", "MNRI",
+    ]
+
+    # aggregated_therapies collapses MNRI to one, merging domains + relevance.
+    agg = {a.therapy: a for a in resp.aggregated_therapies}
+    assert [a.therapy for a in resp.aggregated_therapies] == ["MNRI", "Feldenkrais"]
+    assert agg["MNRI"].domains == ["Sensory Processing", "Body Awareness"]
+    assert agg["MNRI"].relevance == ["Primary", "Secondary"]
+    assert agg["Feldenkrais"].domains == ["Sensory Processing"]
+
+    # No aggregated therapy name repeats.
+    names = [a.therapy for a in resp.aggregated_therapies]
+    assert len(names) == len(set(names))
+
+
+def test_aggregated_therapies_empty_when_no_mappings():
+    filtered = _filtered([], user_id="u9", classification="NT")
+    mapped = _mapped([], user_id="u9", classification="NT")
+    resp = build_mapped_response(filtered, mapped)
+    assert resp.mapped_domains == []
+    assert resp.aggregated_therapies == []
