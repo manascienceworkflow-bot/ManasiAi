@@ -101,6 +101,14 @@ def test_happy_path_returns_mapped_therapies(client):
         {"therapy": "Feldenkrais", "relevance": "Secondary"},
     ]
 
+    # Therapy-centric view: one object per therapy, no duplicate names.
+    agg = body["aggregated_therapies"]
+    assert [a["therapy"] for a in agg] == ["MNRI", "Feldenkrais"]
+    names = [a["therapy"] for a in agg]
+    assert len(names) == len(set(names))
+    assert agg[0]["domains"] == ["Sensory Processing"]
+    assert agg[0]["relevance"] == ["Primary"]
+
 
 def test_array_wrapped_payload_is_equivalent(client):
     bare = client.post("/roadmap/mapped-therapies", json=_payload()).json()
@@ -175,7 +183,9 @@ def test_non_json_body_is_400(client):
 def test_all_low_severity_is_200_with_empty_mapped_domains(client):
     resp = client.post("/roadmap/mapped-therapies", json=_payload(severity="Low"))
     assert resp.status_code == 200
-    assert resp.json()["mapped_domains"] == []
+    body = resp.json()
+    assert body["mapped_domains"] == []
+    assert body["aggregated_therapies"] == []
 
 
 def test_unmatched_domain_is_200_and_absent_from_mapped_domains(client):
@@ -216,10 +226,12 @@ def test_mapping_data_unavailable_is_500(monkeypatch):
 
 def test_response_exposes_only_contract_keys(client):
     body = client.post("/roadmap/mapped-therapies", json=_payload()).json()
-    assert set(body) == {"user_id", "classification", "mapped_domains"}
+    assert set(body) == {"user_id", "classification", "mapped_domains", "aggregated_therapies"}
     d = body["mapped_domains"][0]
     assert set(d) == {"domain", "domain_type", "score", "severity", "therapies"}
     assert set(d["therapies"][0]) == {"therapy", "relevance"}
+    a = body["aggregated_therapies"][0]
+    assert set(a) == {"therapy", "domains", "relevance"}
     for leaked in ("source_row", "matched_domain", "diagnostics", "unmapped"):
         assert leaked not in str(body)
 

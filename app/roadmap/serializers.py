@@ -46,14 +46,34 @@ class MappedDomainOut(BaseModel):
     therapies: list[TherapyOut]
 
 
+class AggregatedTherapyOut(BaseModel):
+    """One unique therapy in the therapy-centric view -- the same therapy is
+    emitted once no matter how many domains recommend it. `domains` is every unique
+    domain that recommended it (first-seen order); `relevance` is every unique
+    non-empty relevance label seen for it (first-seen order), empty if none. All
+    strings are first-seen VERBATIM spellings; casing is used only for dedup keys.
+    Built by therapy_aggregator.aggregate_therapies."""
+
+    therapy: str
+    domains: list[str]
+    relevance: list[str] = []
+
+
 class MappedTherapyResponse(BaseModel):
     """The public contract for POST /roadmap/mapped-therapies. Flat, list-based,
     JSON-safe. `mapped_domains` may be empty (a legitimate all-Low / all-unmatched
-    outcome, not an error)."""
+    outcome, not an error).
+
+    `aggregated_therapies` is an ADDITIVE, therapy-centric view of the same data:
+    the domain-centric `mapped_domains` transposed so each therapy appears once,
+    with its recommending domains merged. It exists so the frontend renders no
+    duplicate therapy cards; `mapped_domains` is left untouched for existing
+    consumers. May be empty whenever `mapped_domains` is."""
 
     user_id: str
     classification: Literal["ND", "NT"]
     mapped_domains: list[MappedDomainOut]
+    aggregated_therapies: list[AggregatedTherapyOut] = []
 
 
 def build_mapped_response(
@@ -101,8 +121,15 @@ def build_mapped_response(
             )
         )
 
+    # Additive therapy-centric view: transpose the domain-centric list so each
+    # therapy appears once. Derived from `mapped_domains` (not the frozen mapper
+    # output) so the two views can never disagree. Local import breaks the cycle
+    # (therapy_aggregator imports AggregatedTherapyOut from this module).
+    from app.roadmap.therapy_aggregator import aggregate_therapies
+
     return MappedTherapyResponse(
         user_id=mapped.user_id,
         classification=mapped.classification,
         mapped_domains=mapped_domains,
+        aggregated_therapies=aggregate_therapies(mapped_domains),
     )
