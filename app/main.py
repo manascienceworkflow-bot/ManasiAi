@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -7,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from app.config import settings
 from app.db import supabase
 from app.roadmap import services as roadmap_services
+from app.roadmap.mapping_loader import MappingLoadError, get_mappings
 from app.roadmap.routes import router as roadmap_router
 from app.models import (
     AnswerResponse,
@@ -30,6 +32,8 @@ from app.rag.chain import build_chain
 from pydantic import BaseModel
 from typing import Optional
 
+logger = logging.getLogger("app.main")
+
 MAX_HISTORY_TURNS = 6
 
 chat_chain = None
@@ -42,10 +46,40 @@ cta_graph = None
 session_histories: dict[str, list] = {}
 
 
+def _validate_mapping_data() -> None:
+    """Eagerly load the therapy-mapping workbooks at startup so a misnamed,
+    missing, or corrupt file surfaces here -- with its real cause -- instead of
+    as an opaque `mapping_data_unavailable` 500 on the first request.
+
+    Deliberately NON-fatal: the loader's design keeps this off the import path so
+    a bad workbook can't take down the whole app (chat and the other endpoints
+    don't need it). We warm the cache and log the exact reason loudly; the
+    /roadmap/mapped-therapies route still returns its typed error if it's broken.
+    """
+    try:
+        bundle = get_mappings()
+        logger.info(
+            "startup: therapy mapping data OK (ND=%d rows, NT=%d rows) from %s",
+            bundle.neurodivergent.row_count,
+            bundle.neurotypical.row_count,
+            settings.roadmap_mapping_dir,
+        )
+    except MappingLoadError as exc:
+        logger.error(
+            "startup: THERAPY MAPPING DATA UNAVAILABLE -- /roadmap/mapped-therapies "
+            "will fail until this is fixed. code=%s source=%s field=%s: %s",
+            exc.code,
+            exc.source,
+            exc.field,
+            exc.message,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global chat_chain, understanding_graph, knowledge_graph, response_graph, empathy_graph, safety_graph, cta_graph
     settings.validate()
+    _validate_mapping_data()
     chat_chain = build_chain()
     understanding_graph = build_understanding_graph()
     knowledge_graph = build_knowledge_graph()
