@@ -1,0 +1,14 @@
+.env
+venv/
+__pycache__/
+*.pyc
+vectorstore/
+chroma_store/
+
+# Unrequired / non-source files
+docs/
+
+AUDIT_REPORT.md
+bug.txt
+tech stack.txt
+Manasi — CTA.pdf
