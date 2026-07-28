@@ -40,6 +40,35 @@ CONCEPT_STRUCTURE_INSTRUCTIONS = (
     "genuinely help understanding."
 )
 
+# Structure for a turn where the Knowledge Node resolved a concern file. The five beats
+# are MANASI_ANSWER_PLAYBOOK.md Part 2's Explain shape; the section->beat mapping is spec
+# Section 7.6. This prompt references that structure rather than re-specifying tone or
+# format, which stay with the playbook and the Empathy Node.
+CONCERN_STRUCTURE_INSTRUCTIONS = (
+    "Structured knowledge about this exact concern was found (see CONCERN KNOWLEDGE "
+    "below). Build the body of your answer from it, as flowing prose, in this order:\n"
+    "1. Normalise without dismissing — draw on Summary and Common Misunderstandings.\n"
+    "2. Give two to four plausible, non-diagnostic reasons — draw on Possible "
+    "Explanations. Select the ones that best fit what the user actually described.\n"
+    "3. Apply the ManaScience lens — draw on ManaScience Perspective and Neuroplasticity "
+    "Explanation, naming the developmental areas involved.\n"
+    "4. State the boundary — draw on Professional Boundary. This element is never "
+    "optional, and its wording is approved: reproduce it as written rather than "
+    "rephrasing it.\n"
+    "5. Point to a next step — draw on Things to Observe, Everyday Support Ideas, and "
+    "When Professional Evaluation May Help.\n\n"
+    "Hard rules for this material:\n"
+    "- Keep every qualifier exactly as written. 'some children' stays 'some children'; "
+    "'may help' stays 'may help'. Removing a hedge turns an explanation into a diagnosis.\n"
+    "- Never state or imply that the child has any condition, and never rule one out.\n"
+    "- Name only the therapies or approaches that appear in the material, and only as "
+    "areas to understand — never as a recommendation for this child.\n"
+    "- Do not output section headings, labels, or bullet-point dumps of a section. The "
+    "sections are raw material; the answer is prose.\n"
+    "- Do not add an opening acknowledgement, a supportive closing line, or an invitation "
+    "to continue. Those are added later by a different system."
+)
+
 DIRECT_STRUCTURE_INSTRUCTIONS = (
     "This is not a general concept-explanation question. Answer it directly and "
     "proportionately — give the user what they actually asked for without forcing it "
@@ -104,29 +133,100 @@ class _Attempt:
     violation_count: int
 
 
-def _format_retrieved_context(retrieved_docs: list[dict]) -> str:
-    if not retrieved_docs:
+# Section key -> the label the model sees. Ordered as in the concern schema so the
+# rendered block reads top-to-bottom like the source file.
+CONCERN_SECTION_LABELS = [
+    ("summary", "Summary"),
+    ("possible_explanations", "Possible Explanations"),
+    ("things_to_observe", "Things to Observe"),
+    ("everyday_support_ideas", "Everyday Support Ideas"),
+    ("manascience_perspective", "ManaScience Perspective"),
+    ("neuroplasticity_explanation", "Neuroplasticity Explanation"),
+    ("professional_boundary", "Professional Boundary"),
+    ("when_professional_evaluation_may_help", "When Professional Evaluation May Help"),
+    ("common_misunderstandings", "Common Misunderstandings"),
+    ("what_this_concern_is_not", "What This Concern Is Not"),
+    ("age_specific_notes", "Age-Specific Notes"),
+    ("cultural_and_multilingual_notes", "Cultural and Multilingual Notes"),
+]
+
+NO_CONCERN_KNOWLEDGE = "(No specific concern was resolved for this question.)"
+
+
+def _format_concern_knowledge(resolved_concern: Optional[dict]) -> str:
+    """Render the resolved concern record as labelled sections for the prompt."""
+    if not resolved_concern:
+        return NO_CONCERN_KNOWLEDGE
+
+    lines = [f"CONCERN: {resolved_concern['title']} ({resolved_concern['concern_id']})"]
+    domains = resolved_concern.get("development_domains") or []
+    if domains:
+        lines.append(f"Developmental areas: {', '.join(domains)}")
+    lines.append("")
+
+    summary = (resolved_concern.get("summary") or "").strip()
+    sections = resolved_concern.get("sections") or {}
+    for key, label in CONCERN_SECTION_LABELS:
+        if key == "summary":
+            if summary:
+                lines.extend([label + ":", summary, ""])
+            continue
+        bullets = sections.get(key) or []
+        if not bullets:
+            continue
+        lines.append(label + ":")
+        lines.extend(f"- {bullet}" for bullet in bullets)
+        lines.append("")
+
+    for related in resolved_concern.get("related_concerns") or []:
+        lines.append(
+            f"Related concern ({related['relation']}) — {related['title']}: {related['summary']}"
+        )
+    return "\n".join(lines).strip()
+
+
+def _format_retrieved_context(retrieved_docs: list[dict], resolved_concern: Optional[dict] = None) -> str:
+    """Render supporting chunks. Chunks belonging to the resolved concern are omitted --
+    the structured record above already carries that material in full, and sending both
+    wastes context and invites the model to quote the fragment instead of explaining it."""
+    concern_id = (resolved_concern or {}).get("concern_id")
+    docs = [
+        doc for doc in retrieved_docs
+        if not (concern_id and (doc.get("metadata") or {}).get("concern_id") == concern_id)
+    ]
+    if not docs:
+        if resolved_concern:
+            return "(No additional reference material beyond the concern knowledge above.)"
         return "(No ManaScience content was retrieved for this question. Answer using general knowledge.)"
     blocks = [
         f"[{i}] ({doc['content_type']} — {doc['source_title']})\n{doc['content']}"
-        for i, doc in enumerate(retrieved_docs, start=1)
+        for i, doc in enumerate(docs, start=1)
     ]
     return "\n\n".join(blocks)
 
 
+def _select_structure_instructions(understanding: dict, resolved_concern: Optional[dict]) -> str:
+    if resolved_concern:
+        return CONCERN_STRUCTURE_INSTRUCTIONS
+    if understanding["intent"] == "concept_explanation":
+        return CONCEPT_STRUCTURE_INSTRUCTIONS
+    return DIRECT_STRUCTURE_INSTRUCTIONS
+
+
 def _build_prompt(understanding: dict, knowledge: dict, user_message: str, extra_suffix: str = "") -> str:
     knowledge_instructions = RAG_INSTRUCTIONS if knowledge["source"] == "rag" else LLM_INSTRUCTIONS
-    structure_instructions = (
-        CONCEPT_STRUCTURE_INSTRUCTIONS
-        if understanding["intent"] == "concept_explanation"
-        else DIRECT_STRUCTURE_INSTRUCTIONS
-    )
+    resolved_concern = knowledge.get("resolved_concern")
+    structure_instructions = _select_structure_instructions(understanding, resolved_concern)
     prompt = (
         _PROMPT_TEMPLATE.replace("{{knowledge_instructions}}", knowledge_instructions)
         .replace("{{structure_instructions}}", structure_instructions)
         .replace("{{intent}}", understanding["intent"])
         .replace("{{topic}}", understanding["topic"])
-        .replace("{{retrieved_context}}", _format_retrieved_context(knowledge["retrieved_docs"]))
+        .replace("{{concern_knowledge}}", _format_concern_knowledge(resolved_concern))
+        .replace(
+            "{{retrieved_context}}",
+            _format_retrieved_context(knowledge["retrieved_docs"], resolved_concern),
+        )
         .replace("{{user_message}}", user_message.strip())
     )
     return prompt + extra_suffix
@@ -160,11 +260,30 @@ def _shingles(text: str, n: int) -> set[str]:
     return {" ".join(words[i : i + n]) for i in range(len(words) - n + 1)}
 
 
-def _is_document_dump(answer: str, retrieved_docs: list[dict]) -> bool:
+def _boundary_exempt_shingles(resolved_concern: Optional[dict], n: int) -> set[str]:
+    """Shingles the copy-detector must ignore.
+
+    The Professional Boundary bullets carry MANASI_ANSWER_PLAYBOOK.md Part 4's approved
+    phrasings, which the answer is *required* to reproduce as written (spec V-47). Without
+    this exemption the copy guard would penalise exactly the behaviour the playbook
+    mandates. Scoped to that one section: every other chunk stays under the full check.
+    """
+    if not resolved_concern:
+        return set()
+    bullets = (resolved_concern.get("sections") or {}).get("professional_boundary") or []
+    exempt: set[str] = set()
+    for bullet in bullets:
+        exempt |= _shingles(bullet, n)
+    return exempt
+
+
+def _is_document_dump(
+    answer: str, retrieved_docs: list[dict], resolved_concern: Optional[dict] = None
+) -> bool:
     if not retrieved_docs:
         return False
     n = settings.response_document_dump_shingle_words
-    answer_shingles = _shingles(answer, n)
+    answer_shingles = _shingles(answer, n) - _boundary_exempt_shingles(resolved_concern, n)
     if not answer_shingles:
         return False
     return any(_shingles(doc["content"], n) & answer_shingles for doc in retrieved_docs)
@@ -179,21 +298,25 @@ def _is_too_short(answer: str) -> bool:
     return len(answer.strip()) < settings.response_min_answer_length
 
 
-def _count_violations(answer: str, retrieved_docs: list[dict]) -> int:
+def _count_violations(
+    answer: str, retrieved_docs: list[dict], resolved_concern: Optional[dict] = None
+) -> int:
     return (
         int(_is_too_short(answer))
         + int(_contains_banned_phrase(answer))
-        + int(_is_document_dump(answer, retrieved_docs))
+        + int(_is_document_dump(answer, retrieved_docs, resolved_concern))
     )
 
 
-def _corrective_suffix_for(answer: str, retrieved_docs: list[dict]) -> str:
+def _corrective_suffix_for(
+    answer: str, retrieved_docs: list[dict], resolved_concern: Optional[dict] = None
+) -> str:
     suffixes = []
     if _is_too_short(answer):
         suffixes.append(CORRECTIVE_REPROMPT_SUFFIX_TOO_SHORT)
     if _contains_banned_phrase(answer):
         suffixes.append(CORRECTIVE_REPROMPT_SUFFIX_BANNED_PHRASE)
-    if _is_document_dump(answer, retrieved_docs):
+    if _is_document_dump(answer, retrieved_docs, resolved_concern):
         suffixes.append(CORRECTIVE_REPROMPT_SUFFIX_DOCUMENT_DUMP)
     return "".join(suffixes)
 
@@ -241,11 +364,12 @@ def generate_response(
             extra_suffix = CORRECTIVE_REPROMPT_SUFFIX_MALFORMED
             continue
 
-        violations = _count_violations(answer, knowledge["retrieved_docs"])
+        resolved_concern = knowledge.get("resolved_concern")
+        violations = _count_violations(answer, knowledge["retrieved_docs"], resolved_concern)
         attempts.append(_Attempt(answer=answer, violation_count=violations))
         if violations == 0:
             break
-        extra_suffix = _corrective_suffix_for(answer, knowledge["retrieved_docs"])
+        extra_suffix = _corrective_suffix_for(answer, knowledge["retrieved_docs"], resolved_concern)
 
     clean_attempt = next((a for a in attempts if a.violation_count == 0), None)
     if clean_attempt is not None:

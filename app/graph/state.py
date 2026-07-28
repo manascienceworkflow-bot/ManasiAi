@@ -37,11 +37,48 @@ class RetrievedDocument(TypedDict):
         "website_content",
         "neuroplasticity_content",
         "pdf_document",
+        # Structured knowledge corpora under data/knowledge/**. Only concern_knowledge is
+        # populated today; the rest are reserved so adding a corpus is a content task, not
+        # a schema change across every node.
+        "concern_knowledge",
+        "condition_knowledge",
+        "therapy_knowledge",
+        "assessment_knowledge",
+        "milestone_knowledge",
     ]
     source_title: str
     source_url: Optional[str]
     similarity_score: float
     metadata: dict
+
+
+class RelatedConcernSummary(TypedDict):
+    concern_id: str
+    title: str
+    summary: str
+    relation: str
+
+
+class ResolvedConcern(TypedDict):
+    """One concern file resolved from the retrieved chunks (Knowledge Node stage B).
+
+    Carries the *structured* record rather than chunk text, so Response Generation
+    assembles an answer from named sections instead of stitching fragments. Section
+    bullets are keyed by the loader's section keys (summary, possible_explanations, ...).
+    """
+
+    concern_id: str
+    title: str
+    category: str
+    topic: str
+    score: float
+    margin: float
+    matched_sections: list[str]
+    development_domains: list[str]
+    related_therapies: list[str]
+    sections: dict[str, list[str]]
+    summary: str
+    related_concerns: list[RelatedConcernSummary]
 
 
 class Knowledge(TypedDict):
@@ -54,6 +91,7 @@ class Knowledge(TypedDict):
     content_types_searched: list[str]
     retrieval_time_ms: float
     error: Optional[str]
+    resolved_concern: Optional[ResolvedConcern]
 
 
 class Response(TypedDict):

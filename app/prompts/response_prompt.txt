@@ -44,7 +44,14 @@ SIMPLIFICATION RULES:
   wording, not the substance.
 
 ---
-CONTEXT (reference material, classified as intent="{{intent}}", topic="{{topic}}"):
+CONCERN KNOWLEDGE (structured educational material about this exact concern, if one was
+identified; each section is raw material to explain in your own words, never a block to
+copy out or to label with a heading):
+
+{{concern_knowledge}}
+
+---
+CONTEXT (additional reference material, classified as intent="{{intent}}", topic="{{topic}}"):
 
 {{retrieved_context}}
 

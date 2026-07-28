@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import re
 import sys
@@ -11,6 +12,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: E402
 
 from app.config import settings  # noqa: E402
+from app.knowledge.concern_chunker import chunk_concern  # noqa: E402
+from app.knowledge.concern_loader import get_published_concerns, load_concern_data  # noqa: E402
 from app.rag.chroma_client import get_collection  # noqa: E402
 from app.rag.embeddings import get_embeddings  # noqa: E402
 
@@ -112,6 +115,55 @@ def load_website_chunks(path: Path) -> list[dict]:
     return chunks
 
 
+def load_concern_chunks() -> "tuple[list[dict], dict[str, int]]":
+    """Chunk every ingestable concern file (spec Section 10.3).
+
+    Only `status: published` AND `clinical_review_status: reviewed` files are embedded --
+    draft content stays in the repo, reviewable and diffable, but unreachable by a parent.
+
+    Chunking is structural (`app/knowledge/concern_chunker.py`), not character-based: the
+    text splitter used by the legacy corpora above would cut mid-bullet and merge across
+    sections, destroying the section attribution that concern resolution depends on.
+    """
+    result = load_concern_data()
+    for issue in result.issues:
+        print(f"  ! skipped {issue.source_path}: {issue.reason} — {issue.detail}", flush=True)
+
+    chunks: "list[dict]" = []
+    breakdown: "dict[str, int]" = {}
+    for record in get_published_concerns():
+        specs = chunk_concern(record)
+        breakdown[record.concern_id] = len(specs)
+        for spec in specs:
+            metadata = {key: value for key, value in spec.metadata.items() if value is not None}
+            metadata["ingested_at"] = datetime.now(timezone.utc).isoformat()
+            chunks.append(
+                {
+                    "id": spec.chunk_id,
+                    "content": spec.text,
+                    "metadata": metadata,
+                    "concern_uid": spec.concern_uid,
+                }
+            )
+    unpublished = len(result.records) - len(breakdown)
+    if unpublished:
+        print(f"  ~ {unpublished} concern file(s) not ingested (not published/reviewed)", flush=True)
+    return chunks, breakdown
+
+
+def delete_existing_concern_vectors(collection, concern_uids: "set[str]") -> None:
+    """Drop a concern's existing vectors before re-upserting it (spec rule R-1).
+
+    Without this, a section deleted from a file survives in the index forever: its chunk_id
+    is never revisited by an upsert, so it silently keeps grounding answers.
+    """
+    for uid in sorted(concern_uids):
+        try:
+            collection.delete(where={"concern_uid": uid})
+        except Exception as exc:  # a missing collection/filter must not abort the build
+            print(f"  ! could not clear existing vectors for {uid}: {exc}", flush=True)
+
+
 def compute_chunk_id(source_id: str, chunk_index: int) -> str:
     return hashlib.sha256(f"{source_id}:{chunk_index}".encode("utf-8")).hexdigest()
 
@@ -133,31 +185,57 @@ def build_metadata_envelope(chunk: dict, chunk_index: int) -> dict:
 def main():
     import os
 
+    parser = argparse.ArgumentParser(description="Build the ManaScience knowledge index.")
+    parser.add_argument(
+        "--concerns-only",
+        action="store_true",
+        help="ingest only the Concern Knowledge Library, leaving the legacy corpora untouched",
+    )
+    args = parser.parse_args()
+
     print("CHROMA_PERSIST_DIR ENV =", os.getenv("CHROMA_PERSIST_DIR"), flush=True)
     print("Resolved Persist Dir =", settings.chroma_persist_dir, flush=True)
     print("Current Working Dir =", Path.cwd(), flush=True)
     settings.validate()
 
-    chunks_by_type = {
-        "faq": load_faq_chunks(settings.data_dir / "manascience_faq.md"),
-        "therapy_info": load_therapy_chunks(settings.data_dir / "manascience_therapies.md"),
-        "website_content": load_website_chunks(settings.data_dir / "manasi_overview.md"),
-    }
-    # The other six content types (course, blog, research_article, practitioner_info,
-    # neuroplasticity_content, pdf_document) have no real ManaScience content yet and are
-    # deliberately not wired up here -- sourcing them is a separate, later task.
-
     ids: list[str] = []
     documents: list[str] = []
     metadatas: list[dict] = []
-    for chunks in chunks_by_type.values():
-        for index, chunk in enumerate(chunks):
-            metadata = build_metadata_envelope(chunk, index)
-            ids.append(metadata["chunk_id"])
-            documents.append(chunk["content"])
-            metadatas.append(metadata)
+    breakdown_parts: list[str] = []
+
+    if not args.concerns_only:
+        chunks_by_type = {
+            "faq": load_faq_chunks(settings.data_dir / "manascience_faq.md"),
+            "therapy_info": load_therapy_chunks(settings.data_dir / "manascience_therapies.md"),
+            "website_content": load_website_chunks(settings.data_dir / "manasi_overview.md"),
+        }
+        # The other six legacy content types (course, blog, research_article,
+        # practitioner_info, neuroplasticity_content, pdf_document) have no real
+        # ManaScience content yet and are deliberately not wired up here.
+        for chunks in chunks_by_type.values():
+            for index, chunk in enumerate(chunks):
+                metadata = build_metadata_envelope(chunk, index)
+                ids.append(metadata["chunk_id"])
+                documents.append(chunk["content"])
+                metadatas.append(metadata)
+        breakdown_parts.extend(f"{content_type}={len(chunks)}" for content_type, chunks in chunks_by_type.items())
+
+    print("Loading concern knowledge...", flush=True)
+    concern_chunks, concern_breakdown = load_concern_chunks()
+    for chunk in concern_chunks:
+        ids.append(chunk["id"])
+        documents.append(chunk["content"])
+        metadatas.append(chunk["metadata"])
+    breakdown_parts.append(f"concern_knowledge={len(concern_chunks)}")
+
     print(f"Data dir: {settings.data_dir}", flush=True)
+    print(f"Knowledge dir: {settings.knowledge_data_dir}", flush=True)
     print(f"Persist dir: {settings.chroma_persist_dir}", flush=True)
+
+    if not documents:
+        print("Nothing to ingest.", flush=True)
+        return
+
     embeddings = get_embeddings()
     vectors: list[list[float]] = []
     for start in range(0, len(documents), BATCH_SIZE):
@@ -165,12 +243,14 @@ def main():
     print("Creating embeddings...", flush=True)
     collection = get_collection()
     print("Opening Chroma collection...", flush=True)
+    delete_existing_concern_vectors(collection, {chunk["concern_uid"] for chunk in concern_chunks})
     collection.upsert(ids=ids, embeddings=vectors, documents=documents, metadatas=metadatas)
     print(f"Upserting {len(documents)} documents...", flush=True)
-    breakdown = ", ".join(f"{content_type}={len(chunks)}" for content_type, chunks in chunks_by_type.items())
+    for concern_id, count in sorted(concern_breakdown.items()):
+        print(f"  concern {concern_id}: {count} chunks", flush=True)
     print(
         f"Ingested {len(documents)} chunks into '{settings.chroma_collection_name}' "
-        f"at {settings.chroma_persist_dir} ({breakdown})"
+        f"at {settings.chroma_persist_dir} ({', '.join(breakdown_parts)})"
     )
 
 
