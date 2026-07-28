@@ -49,7 +49,7 @@ class Settings:
     empathy_model: str = os.getenv("EMPATHY_MODEL", "gpt-4o-mini")
     empathy_temperature: float = float(os.getenv("EMPATHY_TEMPERATURE", "0.5"))
     empathy_max_retries: int = int(os.getenv("EMPATHY_MAX_RETRIES", "1"))
-    empathy_min_length_ratio: float = float(os.getenv("EMPATHY_MIN_LENGTH_RATIO", "0.8"))
+    empathy_min_length_ratio: float = float(os.getenv("EMPATHY_MIN_LENGTH_RATIO", "1.0"))
     empathy_max_length_ratio: float = float(os.getenv("EMPATHY_MAX_LENGTH_RATIO", "2.5"))
     empathy_fact_retention_min_ratio: float = float(os.getenv("EMPATHY_FACT_RETENTION_MIN_RATIO", "0.9"))
 

@@ -98,7 +98,7 @@ The node SHALL be a pure function of (`response`, `understanding.emotional_state
 | Humanization call latency (first attempt) | p95 < 2,000ms | Single chat completion call; input is one answer string plus instructions, no retrieved-context block. |
 | End-to-end node latency | p95 < 3,000ms | First attempt + possible one corrective retry + guard checks (guard checks are local string/token operations, not LLM calls, and add negligible latency). |
 | Max generation attempts | 2 (`EMPATHY_MAX_RETRIES = 1`) | One initial attempt, one corrective retry; never more (FR-11, FR-12). |
-| Min length ratio | 0.8 (`EMPATHY_MIN_LENGTH_RATIO`) | `final_answer` word count must be ≥ 80% of input `answer` word count — a floor against the model trimming content while adding warmth. |
+| Min length ratio | 1.0 (`EMPATHY_MIN_LENGTH_RATIO`) | `final_answer` word count must be ≥ 100% of input `answer` word count — a floor against the model trimming content while adding warmth. Set at parity (not below) because the acknowledge/support/invite sentences are additive to the explanation, so a compliant rewrite is always at least as long as the input. |
 | Max length ratio | 2.5 (`EMPATHY_MAX_LENGTH_RATIO`) | `final_answer` word count must be ≤ 250% of input `answer` word count — a ceiling against rambling, padded openers/closers that bloat latency and cost without adding value. |
 | Fact-retention minimum ratio | 0.9 (`EMPATHY_FACT_RETENTION_MIN_RATIO`) | At least 90% of extracted key tokens (numbers, key terms) from the input `answer` must still be present in `final_answer` (Section 7.4). |
 | Cost per turn | 1–2 chat completion calls | Cost scales with retry rate, which should trend toward zero as the prompt is tuned. |
