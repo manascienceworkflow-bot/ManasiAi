@@ -46,6 +46,10 @@ class KnowledgeResponse(BaseModel):
     content_types_searched: list[str]
     retrieval_time_ms: float
     error: str | None
+    # Which concern file (if any) the retrieved chunks resolved to. Surfaced on the debug
+    # endpoint because "why did it answer like that?" is usually a retrieval question, and
+    # the resolved concern plus its score is the fastest way to see the answer.
+    resolved_concern: dict | None = None
 
 
 class AnswerResponse(BaseModel):

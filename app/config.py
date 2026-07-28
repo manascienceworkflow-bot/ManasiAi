@@ -59,6 +59,27 @@ class Settings:
 
     cta_data_dir: Path = BASE_DIR / os.getenv("CTA_DATA_DIR", "data/cta")
 
+    # Concern Knowledge Library (data/knowledge/**). The corpus root holds the concern
+    # files plus `_`-prefixed infrastructure directories (_schema, _templates) that are
+    # never loaded or ingested.
+    knowledge_data_dir: Path = BASE_DIR / os.getenv("KNOWLEDGE_DATA_DIR", "data/knowledge")
+    concern_resolution_enabled: bool = os.getenv("CONCERN_RESOLUTION_ENABLED", "true").lower() != "false"
+    # Deliberately above rag_similarity_threshold: resolving to the *wrong* concern is
+    # worse than resolving to none, since the whole record then grounds the answer.
+    concern_resolution_threshold: float = float(os.getenv("CONCERN_RESOLUTION_THRESHOLD", "0.45"))
+    # Second, lower bar for colloquial phrasings, which score low in absolute terms while
+    # still concentrating almost every retrieved chunk on one concern. Calibrated against
+    # the live index: correct-but-low matches sat at 0.24-0.39 with a 0.83-1.00 share,
+    # whereas a cross-topic false positive scored ~0.56 with a 0.17 share.
+    concern_dominance_min_score: float = float(os.getenv("CONCERN_DOMINANCE_MIN_SCORE", "0.22"))
+    concern_dominance_ratio: float = float(os.getenv("CONCERN_DOMINANCE_RATIO", "0.6"))
+    # A single chunk is not "concentration". Real dominant matches returned 5-8 chunks from
+    # the winning concern; requiring three keeps thin evidence on the score bar alone.
+    concern_dominance_min_chunks: int = int(os.getenv("CONCERN_DOMINANCE_MIN_CHUNKS", "3"))
+    concern_dominance_margin: float = float(os.getenv("CONCERN_DOMINANCE_MARGIN", "0.03"))
+    concern_max_related: int = int(os.getenv("CONCERN_MAX_RELATED", "2"))
+    concern_max_chunk_chars: int = int(os.getenv("CONCERN_MAX_CHUNK_CHARS", "1200"))
+
     # Roadmap therapy-mapping source workbooks (Neurodivergent_map.xlsx /
     # Neurotypical_map.xlsx). Read-only reference data consumed by the roadmap
     # mapping loader; never written to.
