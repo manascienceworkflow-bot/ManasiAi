@@ -39,7 +39,14 @@ Trigger Conditions:
 - What approaches does ManaScience offer?
 - I'm looking for therapy options.
 - What therapies should I explore?
-
+- Can you recommend something that might help?
+- What's the best approach for this?
+- What options do I have?
+- Is there anything that can help me?
+- Where do I begin?
+- What's the most effective way to deal with this?
+- Can you suggest the next steps?
+- How can I manage these difficulties?
 ## Therapy Selection / Decision Support
 - Which therapy should I choose?
 - How do I manage my anxiety ?
