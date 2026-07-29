@@ -42,6 +42,7 @@ Trigger Conditions:
 
 ## Therapy Selection / Decision Support
 - Which therapy should I choose?
+- How do I manage my anxiety ?
 - Which therapy is best for my child?
 - Which therapy should I start with?
 - Can you help me choose a therapy?
