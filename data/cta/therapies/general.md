@@ -39,10 +39,17 @@ Trigger Conditions:
 - What approaches does ManaScience offer?
 - I'm looking for therapy options.
 - What therapies should I explore?
-
+- What should I do now?
+- Can you recommend something that might help?
+- What's the best approach for this?
+- What options do I have?
+- Is there anything that can help me?
+- Where do I begin?
+- What's the most effective way to deal with this?
+- Can you suggest the next steps?
+- How can I manage these difficulties?
 ## Therapy Selection / Decision Support
 - Which therapy should I choose?
-- How do I manage my anxiety ?
 - Which therapy is best for my child?
 - Which therapy should I start with?
 - Can you help me choose a therapy?
@@ -61,7 +68,6 @@ Trigger Conditions:
 - My child needs therapy. Where should I start?
 - Help me understand the different therapies.
 - I'm interested in therapy options.
-- Help me understand therapies.
 - Can you suggest some therapies?
 - What therapy should I read about first?
 
