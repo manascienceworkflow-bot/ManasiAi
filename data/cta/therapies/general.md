@@ -48,6 +48,7 @@ Can you show me the different ways children with developmental challenges are su
 - I'm confused because everyone suggests something different for constant worry and stress. How do I choose the right approach?
 - I've been feeling nervous most of the time and don't know where to begin. Can you help me understand my options?
 - There are so many ways people say you can deal with constant worry and overthinking. How can I figure out which one is most suitable for me?
+- I'm always worried. What should I do?
 
 ## Therapy Discovery
 - What therapy options are there?
@@ -67,6 +68,28 @@ Can you show me the different ways children with developmental challenges are su
 - What's the most effective way to deal with this?
 - Can you suggest the next steps?
 - How can I manage these difficulties?
+
+## Managing Anxiety, Stress and Worry
+- How do I manage my anxiety?
+- How can I manage my anxiety?
+- How do I deal with my anxiety?
+- How do I cope with my anxiety?
+- How do I reduce my anxiety?
+- What can I do about my anxiety?
+- What helps with anxiety?
+- How do I manage my stress?
+- How do I manage my worry?
+- How do I manage my overthinking?
+- I want to manage my anxiety.
+- Help me manage my anxiety.
+- How do I manage anxiety?
+- How can I manage anxiety?
+- How to manage anxiety?
+- How do I deal with anxiety?
+- How do I cope with anxiety?
+- How can I reduce anxiety?
+- How do I manage stress?
+- How do I stop overthinking?
 ## Therapy Selection / Decision Support
 - Which therapy should I choose?
 - Which therapy is best for my child?
