@@ -60,6 +60,7 @@ Trigger Conditions:
 - My child needs therapy. Where should I start?
 - Help me understand the different therapies.
 - I'm interested in therapy options.
+- Help me understand therapies.
 - Can you suggest some therapies?
 - What therapy should I read about first?
 
