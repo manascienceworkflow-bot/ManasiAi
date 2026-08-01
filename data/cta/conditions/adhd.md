@@ -88,6 +88,7 @@ Trigger Examples:
 - Can ADHD affect time management?
 - Can ADHD affect executive functioning?
 - Can ADHD affect working memory?
+- Give Information on ADHD
 
 ## School & Learning
 
