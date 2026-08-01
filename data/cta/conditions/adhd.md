@@ -251,4 +251,4 @@ Learn More About ADHD
 
 CTA:
 
-https://lifetime.connectwaba.com/#features
+https://manascience.webflow.io/conditions/adhd
