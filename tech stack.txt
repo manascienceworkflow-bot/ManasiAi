@@ -1,0 +1,206 @@
+MANASI — TECH STACK
+====================
+
+API server
+----------
+FastAPI 0.137 + Uvicorn
+  app/main.py exposes /chat, /understand, /knowledge, /respond, /humanize as
+  REST endpoints. Async-friendly, request/response validation comes for free
+  via Pydantic models.
+
+Temp UI
+-------
+Streamlit 1.58 + requests
+  streamlit_app.py is a quick chat front-end that calls the FastAPI endpoints
+  over HTTP. Fastest way to demo the bot without building a real frontend.
+
+Orchestration
+-------------
+LangGraph 1.2.5
+  Each phase (understanding_node, knowledge_node, response_node, empathy_node)
+  is wired as a StateGraph over a shared GraphState TypedDict. Gives explicit,
+  testable node boundaries and partial-state merging instead of one
+  monolithic function.
+
+LLM framework
+--------------
+LangChain core / langchain-classic / langchain-community / langchain-openai /
+langchain-text-splitters
+  Supplies ChatPromptTemplate, the legacy /chat retrieval chain
+  (create_retrieval_chain, create_history_aware_retriever), document loaders,
+  and the OpenAI chat/embedding wrappers. Avoids hand-rolling prompt plumbing
+  and retriever glue.
+
+LLM provider
+------------
+OpenAI — gpt-4o-mini (understanding / response / empathy),
+         text-embedding-3-small (embeddings)
+  Configured via app/config.py env vars. Cheap, fast model for a high-volume
+  conversational node pipeline; swappable per node (UNDERSTANDING_MODEL,
+  RESPONSE_MODEL, EMPATHY_MODEL are separate settings).
+
+Vector store (primary)
+-----------------------
+Chroma 1.3.7 + langchain-chroma
+  Backs the main phase pipeline's knowledge_node (app/rag/retriever.py,
+  chroma_client.py). Chosen because it supports metadata filtering
+  (content_type: $in [...]) needed for intent-biased retrieval — FAISS can't
+  filter by metadata that way.
+
+Vector store (legacy)
+----------------------
+FAISS (faiss-cpu)
+  Backs the older, simpler /chat endpoint (app/rag/ingest.py, chain.py). A
+  flat similarity index, no metadata filtering needed since that path
+  doesn't do intent routing.
+
+Validation
+----------
+Pydantic 2.13
+  Every node's output (UnderstandingOutput, KnowledgeOutput, ResponseOutput)
+  is validated through a Pydantic model with custom model_validator checks
+  (e.g. "source==rag requires non-empty grounded_chunk_ids") before being
+  merged into graph state — catches malformed LLM JSON or internal-logic
+  bugs before they reach the user.
+
+Config
+------
+python-dotenv
+  .env -> app/config.py Settings class. Centralizes all tunables (similarity
+  thresholds, top-k, model names) as env vars instead of hardcoded constants.
+
+Testing
+-------
+pytest 9.1
+  tests/test_understanding_node.py, test_knowledge_node.py,
+  test_response_node.py, test_empathy_node.py — unit tests per phase,
+  matching the per-node graph isolation.
+
+Why two vector stores instead of one:
+  The FAISS/chain.py path looks like the original prototype (single LLM
+  call, no intent classification), while Chroma was adopted for the phase
+  pipeline specifically because Phase 2 (Knowledge) needed content-type-
+  filtered retrieval (INTENT_CONTENT_TYPE_MAP), which Chroma's `where` filter
+  supports natively and a raw FAISS index doesn't.
+
+
+RAG DATA FLOW / ARCHITECTURE
+=============================
+
+1) Offline ingestion (builds the vector store Knowledge retrieves from)
+-------------------------------------------------------------------------
+
+data/*.md (FAQ / Therapies / Website overview)
+        |
+        v
+scripts/build_knowledge_index.py
+  +- load_faq_chunks()      -> split on "---" blocks
+  +- load_therapy_chunks()  -> RecursiveCharacterTextSplitter (700/100)
+  +- load_website_chunks()  -> RecursiveCharacterTextSplitter (800/100)
+        |  (each chunk tagged content_type: faq | therapy_info | website_content)
+        v
+build_metadata_envelope() -> chunk_id (sha256), source_title, ingested_at,
+                              type-specific fields
+        |
+        v
+embeddings.get_embeddings() -> OpenAIEmbeddings.embed_documents()
+                                [text-embedding-3-small]
+        |
+        v
+chroma_client.get_collection().upsert(ids, embeddings, documents, metadatas)
+        |
+        v
+chroma_store/  (persistent Chroma collection "manascience_knowledge",
+                cosine space)
+
+
+2) Online query flow — main phase pipeline (LangGraph)
+---------------------------------------------------------
+
+POST /humanize  {message, session_id}
+        |
+        v
++-----------------------+
+| understanding_node     |  LLM (gpt-4o-mini) classifies user_message +
+| app/nodes/             |  chat_history
+| understanding_node.py  |  -> {intent, topic, search_query, emotional_state}
++-----------+-------------+  (JSON schema-validated, 1 corrective retry,
+            |                else fallback)
+            | understanding
+            v
++-----------------------+
+| knowledge_node         |  skipped entirely if intent == general_chat
+| app/nodes/             |
+| knowledge_node.py      |
++-----------+-------------+
+            | calls retriever.retrieve(search_query, intent)
+            v
+   app/rag/retriever.py
+   +-------------------------------------------------+
+   | Chroma(chroma_store, collection,                  |
+   |        embedding_function=OpenAIEmbeddings)       |
+   |                                                    |
+   | allowed_types = INTENT_CONTENT_TYPE_MAP[intent]   |
+   | similarity_search_with_relevance_scores(           |
+   |     query, k=knowledge_top_k=8,                    |
+   |     filter={content_type: $in allowed_types})      |
+   |                                                    |
+   | if relevant_count < rag_min_relevant_chunks:       |
+   |     retry WITHOUT filter (full collection)          |
+   +-----------+----------------------------------------+
+               | scored_chunks, content_types_searched
+               v
+   knowledge_node._decide_source()
+     score >= rag_similarity_threshold (0.35) AND
+     count >= rag_min_relevant_chunks (1) ?
+        +- yes -> source="rag"  -> dedupe, cap to knowledge_max_returned_chunks (4)
+        |                          and knowledge_max_context_chars (6000)
+        +- no  -> source="llm"  -> retrieved_docs=[]
+               |
+               v  {knowledge: {source, retrieved_docs, confidence,
+                                content_types_searched, ...}}
++-----------------------+
+| response_node          |
+| app/nodes/             |  generate_response() in response_generator.py:
+| response_node.py       |  - stuffs retrieved_docs as CONTEXT into prompt
++-----------+-------------+  - source=="rag" -> RAG_INSTRUCTIONS (stay faithful
+            |                  to material)
+            |                - source=="llm" -> LLM_INSTRUCTIONS (use general
+            |                  knowledge)
+            |                - ChatOpenAI generates -> checked for: too-short,
+            |                  banned refusal phrases, verbatim "document dump"
+            |                  (shingle overlap)
+            |                - retries up to response_max_retries, else
+            |                  best-of fallback
+            v  {response: {answer, source, grounded_chunk_ids, ...}}
++-----------------------+
+| empathy_node           |  re-tones `answer` for understanding.emotional_state
+| app/nodes/             |  (warm/soft phrasing), preserves facts/chunk
+| empathy_node.py        |  grounding, validated by length-ratio + fact-
++-----------+-------------+  retention checks
+            v
+   {empathy: {final_answer, source, grounded_chunk_ids, ...}}  ->  HTTP response
+
+Note: each FastAPI route (/understand, /knowledge, /respond, /humanize)
+compiles and runs its OWN graph from START, just truncated at a different
+node — e.g. /humanize runs all four nodes end-to-end, /knowledge only runs
+understanding_node -> knowledge_node. They are nested subsets of the same
+pipeline, not separate logic.
+
+
+3) The other, simpler RAG path (/chat) — legacy
+--------------------------------------------------
+
+data/*.md -> app/rag/ingest.py -> TextLoader -> RecursiveCharacterTextSplitter
+          -> OpenAIEmbeddings -> FAISS.from_documents() -> vectorstore/
+             (FAISS index)
+
+POST /chat -> app/rag/chain.py build_chain():
+   history_aware_retriever (rewrites query using chat_history)
+        -> FAISS retriever.as_retriever(k=retriever_top_k=4)
+        -> create_stuff_documents_chain (single LLM call, SYSTEM_PROMPT)
+        -> {answer, context}
+
+This is a separate, older single-shot LangChain RAG chain (FAISS, no intent
+routing, no empathy pass) — it doesn't share the Chroma store or the phase-
+node logic at all.

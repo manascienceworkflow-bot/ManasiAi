@@ -1,0 +1,681 @@
+CTA SYSTEM 360° AUDIT REPORT
+Date: 2026-06-26 | Auditor: Claude Sonnet 4.6 | No code was modified
+================================================================================
+
+
+1. EXECUTIVE SUMMARY
+================================================================================
+
+The CTA system is structurally sound. The loader, registry, service, and node
+all function correctly and all 104 automated tests pass. The greeting guard
+works perfectly. The majority of well-formed, specific queries route correctly.
+
+However, the audit identified one confirmed URL typo, five root-cause bugs
+affecting at least 13 real query patterns, and two data gaps. The root causes
+are concentrated in a small number of overly broad single-word aliases in
+Courses (Learning, Training, Education), FAQ (Help), and About (ManaScience).
+Because aliases carry weight=3 — higher than trigger examples (2) — a single
+overly broad alias consistently beats a perfectly good trigger match in the
+correct CTA.
+
+Overall CTA Health Score: 68 / 100
+(86.9% on the stress test, discounted further for the URL typo and the
+severity of the alias pollution root cause)
+
+
+2. PHASE 1 — REPORTED ISSUE VERDICTS
+================================================================================
+
+--- Issue 1: Greeting False Positives ---
+
+Status: FALSE ALARM — Fully Resolved
+
+All 10 listed greetings return cta_found: False as expected. The pattern-based
+guard correctly handles: hi, hello, hey, hy, hii, good morning, thanks,
+thank you, bye, okay. The test test_greeting_guard_against_real_corpus
+confirms this against the live corpus. No action required.
+
+Tested greetings (all pass):
+  Hi, Hello, Hey, Hy, Hii, Good Morning, Thanks, Thank You, Bye, Okay
+
+
+--- Issue 2: Incorrect Category Prioritization (Therapy vs About) ---
+
+Status: CONFIRMED BUG — Root Cause Identified
+
+Failing query : "What therapies does ManaScience offer?"
+Expected      : therapies/general
+Actual        : about/about
+
+Root cause: "ManaScience" is an alias for the About CTA (alias weight = 3).
+The About CTA has no topic-scoping — it matches any question that contains
+the word "ManaScience" anywhere. therapies/general has no alias list at all,
+so its trigger examples (weight = 2) lose to the About alias (weight = 3).
+
+Same root cause also affects:
+  - "Is ManaScience free?"          → about/about (should be subscription)
+  - "Is ManaScience GDPR compliant?" → about/about (should be privacy)
+  - "Can ManaScience help my child?" → faq/faq tie (should be about/about)
+
+Severity: CRITICAL — any question naming the platform gets hijacked.
+
+Recommended Fix:
+  Move "ManaScience" and "Mana Science" from the Aliases section to the
+  Trigger Examples section in data/cta/about/about.md. As triggers (weight=2)
+  they can still match, but a genuine trigger in another CTA will outrank them.
+
+
+--- Issue 3: Missing Neuroplasticity CTA ---
+
+Status: PARTIALLY CONFIRMED BUG — Depends on Topic Field
+
+When the Understanding Node supplies a correct topic (Neuroplasticity, Brain
+Rewiring, Brain Plasticity), the Neuroplasticity CTA is correctly returned.
+Aliases and trigger examples are comprehensive.
+
+Bug occurs in this narrow scenario: topic = "Brain Training", message = "Brain exercises."
+  - search_text = "Brain exercises. Brain Training"
+  - "training" (from Brain Training) matches "Training" alias on Courses (weight=3)
+  - "Brain Training" matches Neuroplasticity related topic (weight=1)
+  - Courses wins 3-1.
+
+Root cause: The alias "Training" on courses/courses.md is a single generic word
+that absorbs compound phrases containing "training" when they appear in topic.
+
+Severity: HIGH — Neuroplasticity CTA is silently lost when topic contains
+"Brain Training".
+
+Recommended Fix:
+  Remove "Training" as a single-word alias from data/cta/courses/courses.md.
+  Alternatively, add "Brain Training" as an alias on the Neuroplasticity CTA,
+  giving it weight 3 to beat Courses' topic weight of 1.
+
+
+--- Issue 4: Verify Every General CTA ---
+
+Full verification results:
+
+  Category       | Query                                  | Expected       | Actual         | Status
+  ---------------+----------------------------------------+----------------+----------------+-------
+  About          | "What is ManaScience?"                 | about/about    | about/about    | PASS
+  About          | "What is ManaScience's mission?"       | about/about    | about/about    | PASS
+  About          | "Is ManaScience evidence-based?"       | about/about    | about/about    | PASS
+  Courses        | "What courses do you offer?"           | courses/courses| courses/courses| PASS
+  Courses        | "Show me your courses."                | courses/courses| courses/courses| PASS
+  Subscription   | "What is the ManaScience subscription?"| subscription   | subscription   | PASS
+  Subscription   | "How do I cancel my subscription?"     | subscription   | subscription   | PASS
+  Subscription   | "Is ManaScience free?"                 | subscription   | about/about    | FAIL
+  Therapy Lib    | "What therapies are available?"        | therapies/gen  | therapies/gen  | PASS
+  Therapy Lib    | "Which therapy should I choose?"       | therapies/gen  | therapies/gen  | PASS
+  Therapy Lib    | "What therapies does ManaScience offer?"| therapies/gen | about/about    | FAIL
+  FAQ            | "FAQ"                                  | faq/faq        | faq/faq        | PASS
+  FAQ            | "Where are your FAQs?"                 | faq/faq        | faq/faq        | PASS
+  Privacy        | "What is your privacy policy?"         | privacy        | privacy        | PASS
+  Privacy        | "Is ManaScience GDPR compliant?"       | privacy        | about/about    | FAIL
+  Community      | "What is the Community Hub?"           | community      | community      | PASS
+  Community      | "How do I join the community?"         | community      | community      | PASS
+  Neuroplasticity| "What is neuroplasticity?"             | neuroplasticity| neuroplasticity| PASS
+  Neuroplasticity| "Can the brain rewire itself?"         | neuroplasticity| neuroplasticity| PASS
+  Neuroplasticity| "Brain rewiring."                      | neuroplasticity| neuroplasticity| PASS
+
+
+3. PHASE 2 — SEMANTIC VERIFICATION
+================================================================================
+
+  Query                                  | Expected        | Actual          | Result
+  ---------------------------------------+-----------------+-----------------+-------
+  "Can I train my brain?"               | neuroplasticity | neuroplasticity | PASS
+  "My child can't focus."               | conditions/adhd | conditions/adhd | PASS (correct)
+  "I want to improve attention."        | conditions/adhd | conditions/adhd | PASS (correct)
+  "My son struggles in school."         | conditions/gen  | conditions/adhd | FAIL
+  "Learning difficulties."              | conditions/gen  | courses/courses | FAIL
+  "Brain exercises." (no topic)         | neuroplasticity | None            | FAIL
+  "My child has trouble concentrating." | conditions/gen  | conditions/gen  | PASS
+  "I want to improve memory."           | variable        | conditions/dep  | BORDERLINE
+  "Help me understand brain development."| neuroplasticity| faq/faq         | FAIL
+
+
+4. PHASE 3 — STRESS TEST SUMMARY
+================================================================================
+
+Test set : 99 realistic questions across all categories
+Result   : 86/99 passed (86.9%)
+
+  Category             | Tested | Pass | Fail
+  ---------------------+--------+------+-----
+  Greetings            |      8 |    8 |    0
+  Conditions (specific)|      9 |    9 |    0
+  Conditions (general) |      7 |    4 |    3
+  Therapies (specific) |      5 |    5 |    0
+  Therapy Library      |      7 |    6 |    1
+  Courses              |      5 |    5 |    0
+  Subscription         |      6 |    5 |    1
+  About                |      5 |    5 |    0
+  FAQ                  |      5 |    5 |    0
+  Privacy              |      5 |    4 |    1
+  Community            |      4 |    4 |    0
+  Neuroplasticity      |      9 |    8 |    1
+  Ambiguous            |      5 |    3 |    2
+  Misspellings         |      3 |    3 |    0
+  Off-topic            |      3 |    3 |    0
+  Navigation           |      6 |    6 |    0
+  Parent / natural lang|      6 |    3 |    3
+
+
+5. CONFIRMED BUGS
+================================================================================
+
+BUG-01 — "ManaScience" Alias Pollution
+---------------------------------------
+Severity : CRITICAL
+File     : data/cta/about/about.md
+
+Problem:
+  "ManaScience" is in the Aliases section (weight=3). Any question that
+  contains the word "ManaScience" routes to About regardless of intent.
+  Alias weight (3) is higher than trigger weight (2), so any trigger match
+  in a different CTA loses.
+
+Confirmed failing queries:
+  - "What therapies does ManaScience offer?" → about/about (should: therapies/general)
+  - "Is ManaScience free?"                   → about/about (should: subscription)
+  - "Is ManaScience GDPR compliant?"         → about/about (should: privacy)
+  - "Can ManaScience help my child?"         → faq/faq tie  (should: about/about)
+
+Fix:
+  In data/cta/about/about.md, move "ManaScience" and "Mana Science" from the
+  Aliases section to the Trigger Examples section. They keep matching, but
+  other CTAs' specific triggers can now outrank them (trigger weight = 2).
+  Also add explicit ManaScience-named triggers to Subscription, Privacy, and
+  Therapy Library files (see BUG-02 fix details).
+
+
+BUG-02 — "Learning" and "Training" Alias Pollution in Courses
+--------------------------------------------------------------
+Severity : HIGH
+File     : data/cta/courses/courses.md
+Aliases  : Learning (weight=3), Training (weight=3), Education (weight=3)
+
+Problem:
+  These three single generic words match in a vast number of non-course
+  contexts. Because aliases weight 3, they beat any topic-level or
+  trigger-level match in the correct CTA.
+
+Confirmed failing queries:
+  - "My child has learning difficulties."      → courses/courses (should: conditions/general)
+  - "Learning difficulties."                   → courses/courses (should: conditions/general)
+  - "Brain exercises." (topic: Brain Training) → courses/courses (should: neuroplasticity)
+
+Secondary cause:
+  conditions/general has "Learning Difficulty" (singular) as an alias, but
+  "learning difficulties" (plural) fails to match it. The engine performs
+  exact normalized matching only — no stemming.
+
+Fix:
+  1. Remove "Learning", "Training", "Education" as standalone single-word
+     aliases from data/cta/courses/courses.md.
+  2. Add "Learning Difficulties" (plural) as an alias to
+     data/cta/conditions/general.md.
+
+
+BUG-03 — "Help" Alias Pollution in FAQ
+---------------------------------------
+Severity : HIGH
+File     : data/cta/faq/faq.md
+Alias    : Help (weight=3)
+
+Problem:
+  "Help" appears in countless non-FAQ contexts. The alias captures any
+  question that contains the word "help" and routes it to the FAQ page.
+
+Confirmed failing queries:
+  - "I need help."                         → faq/faq  (should: None)
+  - "Help me understand brain development."→ faq/faq  (should: neuroplasticity)
+  - "Can ManaScience help my child?"       → faq/faq  (should: about/about)
+  - "My child needs support."              → faq/faq  (should: None)
+
+Fix:
+  Remove "Help" as a single-word alias from data/cta/faq/faq.md.
+  Retain "Help Center" and "Help page" (two-word phrases are specific enough).
+  Add "I need help" as a trigger example if FAQ navigation on that phrase
+  is intentional.
+
+
+
+
+BUG-05 — "Autism" Related Topic False Positive
+-----------------------------------------------
+Severity : MEDIUM
+Files    : data/cta/therapies/neurofeedback.md,
+           data/cta/therapies/arrowsmith.md
+
+Problem:
+  "Autism" appears as a related topic on both Neurofeedback and Arrowsmith.
+  When a user asks about autism and no Autism CTA exists, the query routes
+  to therapies/neurofeedback via the related-topic match (weight=1). The
+  tie-breaker (reverse alphabetical category sort) picks Therapy over
+  Neuroplasticity.
+
+Confirmed failing query:
+  - "What is autism?" (topic: Autism) → therapies/neurofeedback (should: None)
+
+Fix:
+  Remove "Autism" from the Related Topics sections of neurofeedback.md and
+  arrowsmith.md. The trigger examples "Can Neurofeedback help autism?" and
+  "What conditions can Arrowsmith support?" already exist and are sufficient.
+  The related topic is redundant and causes false positives.
+
+
+BUG-06 — Substring Match Overfires on ADHD Trigger
+----------------------------------------------------
+Severity : MEDIUM
+File     : data/cta/conditions/adhd.md
+
+Problem:
+  The ADHD trigger example "My child struggles in school because of ADHD."
+  (normalized: "my child struggles in school because of adhd") is matched
+  by the engine's text_norm-in-phrase_norm substring check against the
+  shorter user message "My child struggles in school." — because the user
+  text is a substring of the trigger phrase.
+
+  Both ADHD and conditions/general score 2 for this message, but since ADHD
+  is a non-Library type and conditions/general is Library, ADHD wins within
+  the Condition category.
+
+Confirmed failing query:
+  - "My child struggles in school." → conditions/adhd (should: conditions/general)
+
+Fix:
+  Rewrite the ADHD trigger to require an explicit ADHD signal, for example:
+    Old: "My child struggles in school because of ADHD."
+    New: "My child with ADHD struggles in school."
+  The existing trigger "My child can't focus in school." (without ADHD
+  mention) is a better ADHD-specific trigger and should be retained.
+
+
+6. NEWLY DISCOVERED BUGS
+================================================================================
+
+NEW-01 — "My son/daughter/kid" Not Covered
+-------------------------------------------
+Severity : MEDIUM
+File     : data/cta/conditions/general.md
+
+Problem:
+  All trigger examples in conditions/general.md use "My child" exclusively.
+  Natural variations — "My son", "My daughter", "My kid", "Our child" — do
+  not match any trigger or alias, causing them to either return no match or
+  be hijacked by a weak related-topic match in a specific CTA.
+
+Confirmed failing query:
+  - "My son has trouble reading." → therapies/arrowsmith (via "Reading" topic)
+    (should: conditions/general)
+
+Fix:
+  Add trigger example variants to data/cta/conditions/general.md:
+    - "My son struggles in school."
+    - "My son has trouble reading."
+    - "My daughter can't focus."
+    - "My daughter has learning difficulties."
+  Or add "son" and "daughter" as related topics (weight=1) on conditions/general.
+
+
+NEW-02 — "Developmental Delays" Data Gap
+-----------------------------------------
+Severity : MEDIUM
+File     : data/cta/conditions/general.md
+
+Problem:
+  "My child has developmental delays." returns no CTA match (cta_found: False).
+  - No trigger example covers "developmental delays"
+  - The related topic "Development" does not match the token "developmental"
+    (the engine has no stemming)
+  - "Developmental Delay" appears in the Do NOT Trigger list as an example
+    of a specific condition, but there is no corresponding general trigger
+
+Confirmed failing query:
+  - "My child has developmental delays." → None (should: conditions/general)
+
+Fix:
+  Add to data/cta/conditions/general.md Trigger Examples:
+    - "My child has developmental delays."
+    - "My child has a developmental delay."
+  Add to Aliases:
+    - "Developmental Delays"
+
+
+NEW-03 — "Reading" Related Topic on Arrowsmith is Too Aggressive
+-----------------------------------------------------------------
+Severity : MEDIUM
+File     : data/cta/therapies/arrowsmith.md
+
+Problem:
+  "Reading" is a related topic for therapies/arrowsmith (weight=1). This
+  causes single-word reading-related questions from parents to route to the
+  Arrowsmith CTA when no other CTA matches, instead of conditions/general.
+
+Confirmed failing query:
+  - "My son has trouble reading." → therapies/arrowsmith (should: conditions/general)
+
+Fix:
+  Replace the bare "Reading" related topic with "Reading Difficulties" or
+  "Dyslexia" in data/cta/therapies/arrowsmith.md. The word "Reading" alone
+  is too generic to be a reliable Arrowsmith signal.
+
+
+NEW-04 — "Support" Related Topic Causes Spurious FAQ Match
+-----------------------------------------------------------
+Severity : LOW
+File     : data/cta/faq/faq.md
+
+Problem:
+  Both FAQ and Community have "Support" as a related topic (weight=1).
+  For the query "My child needs support." (personal_concern intent),
+  neither category gets the affinity bonus. The tie is broken by reverse
+  alphabetical category sort: "FAQ" > "Community", so FAQ wins.
+  The user is sent to the FAQ page for what is clearly a support/community
+  or condition question.
+
+Confirmed failing query:
+  - "My child needs support." → faq/faq (should: None or community)
+
+Fix:
+  Remove "Support" as a standalone related topic from data/cta/faq/faq.md.
+  The alias "Support Center" is sufficient for legitimate FAQ navigation.
+
+
+NEW-05 — "M.N.R.I." Alias Normalization Risk
+---------------------------------------------
+Severity : LOW
+File     : data/cta/therapies/mnri.md
+
+Problem:
+  The alias "M.N.R.I." normalizes to "m n r i" — four single-character
+  tokens. The token-subset matching rule means any text containing all four
+  letters m, n, r, i as individual tokens would technically match. In
+  practice this is unlikely, but it is a latent fragility with no benefit
+  since "MNRI" already covers this case.
+
+Fix:
+  Remove "M.N.R.I." from the Aliases section of data/cta/therapies/mnri.md.
+  The "MNRI" alias covers all practical cases.
+
+
+NEW-06 — No Autism CTA (Data Gap)
+----------------------------------
+Severity : MEDIUM
+
+Problem:
+  There is no CTA for Autism, which is one of the most commonly discussed
+  conditions on ManaScience. Questions like "What is autism?" and "My child
+  may have autism." either return no match (correct but unhelpful) or —
+  worse — return therapies/neurofeedback via a related-topic side-channel.
+
+Fix:
+  Create data/cta/conditions/autism.md following the same pattern as
+  adhd.md and anxiety.md. After creating it, also add Autism to the
+  Do NOT Trigger examples on conditions/general.md.
+
+
+NEW-07 — "Behaviour" and "Attention" Overfire as ADHD Related Topics
+---------------------------------------------------------------------
+Severity : LOW
+File     : data/cta/conditions/adhd.md
+
+Problem:
+  "Behaviour" and "Attention" are listed as related topics for ADHD
+  (weight=1). With personal_concern intent (affinity = Condition), these
+  single words give ADHD a score of 1+1=2, which beats conditions/general
+  (also scoring 1+1=2 in the same category, but Library type loses to
+  non-Library). Generic queries with no ADHD signal are sent to ADHD.
+
+Confirmed failing queries:
+  - "I'm worried about my child's behaviour." → conditions/adhd
+    (should: conditions/general)
+
+Fix:
+  Remove "Behaviour" and "Attention" from the Related Topics section of
+  data/cta/conditions/adhd.md. Both already appear as trigger examples
+  ("Can ADHD cause impulsive behaviour?", "Can ADHD affect concentration?")
+  and do not need to be related topics as well.
+
+
+7. FALSE ALARMS (Working Correctly)
+================================================================================
+
+The following were reported or suspected as bugs but are confirmed working:
+
+  Item                                          | Verdict
+  ----------------------------------------------+---------
+  All 10 listed greetings return no CTA        | Working
+  "Hi", "Hii", "Hy" via regex pattern          | Working
+  "Tell me about therapies." → therapies/general| Working
+  "What therapies are available?" → therapies/g | Working
+  "What is Neuroplasticity?" → neuroplasticity  | Working (with topic)
+  "Brain rewiring." → neuroplasticity           | Working (alias match)
+  "Can I train my brain?" → neuroplasticity     | Working (trigger match)
+  "What is MRNI?" → therapies/mnri             | Working — MRNI is a valid alias
+  "What is Nurofeedback?" → neurofeedback       | Working — topic field matches
+  "My child can't focus." → conditions/adhd     | Correct — ADHD trigger example
+  "I want to improve attention." → adhd         | Correct — "Attention" is ADHD alias
+  104/104 unit tests pass                       | Confirmed
+  Corpus loads with zero issues                 | Confirmed
+
+
+8. SEVERITY AND FIX ORDER
+================================================================================
+
+  Priority | Bug ID  | Severity | Description                        | Fix Location
+  ---------+---------+----------+------------------------------------+---------------------------
+  1        | BUG-04  | CRITICAL | Neuroplasticity URL typo           | neuroplasticity.md line 188
+  2        | BUG-01  | CRITICAL | "ManaScience" alias pollution      | about/about.md Aliases section
+  3        | BUG-02  | HIGH     | "Learning"/"Training" alias pollution| courses/courses.md Aliases
+  4        | BUG-03  | HIGH     | "Help" alias pollution in FAQ      | faq/faq.md Aliases section
+  5        | NEW-02  | MEDIUM   | "Developmental delays" data gap    | conditions/general.md Triggers
+  6        | BUG-05  | MEDIUM   | "Autism" related topic false +ve   | neurofeedback.md, arrowsmith.md
+  7        | BUG-06  | MEDIUM   | Substring match overfire on ADHD   | conditions/adhd.md Triggers
+  8        | NEW-01  | MEDIUM   | "My son/daughter" not covered      | conditions/general.md Triggers
+  9        | NEW-03  | MEDIUM   | "Reading" topic on Arrowsmith      | therapies/arrowsmith.md Topics
+  10       | NEW-06  | MEDIUM   | No Autism CTA                      | New: conditions/autism.md
+  11       | NEW-07  | LOW      | "Behaviour"/"Attention" in ADHD    | conditions/adhd.md Topics
+  12       | NEW-04  | LOW      | "Support" topic in FAQ             | faq/faq.md Related Topics
+  13       | NEW-05  | LOW      | "M.N.R.I." alias fragility         | therapies/mnri.md Aliases
+
+
+9. REGRESSION RISKS
+================================================================================
+
+  Risk                              | Triggered by                 | Check
+  ----------------------------------+------------------------------+------------------------
+  Removing "Learning" from Courses  | Any "learning" query         | Verify "I want structured
+                                    |                              | learning" still matches
+                                    |                              | via trigger example
+  Removing "Training" from Courses  | "Training programs" queries  | Check "What training
+                                    |                              | programs do you offer?"
+                                    |                              | still matches via trigger
+  Moving "ManaScience" to trigger   | Platform-name queries        | Subscription, Privacy,
+                                    |                              | Therapy must get their
+                                    |                              | own ManaScience triggers
+  Removing "Help" from FAQ          | Help-navigation queries      | Retain "Help Center" as
+                                    |                              | two-word alias
+  Adding Autism CTA                 | Any autism query             | Add exclusion guards on
+                                    |                              | conditions/general,
+                                    |                              | neurofeedback,
+                                    |                              | neuroplasticity
+
+
+10. TEST COVERAGE GAPS
+================================================================================
+
+  Missing Test                                              | Priority
+  ----------------------------------------------------------+---------
+  "What therapies does ManaScience offer?" → therapies/gen  | High
+  "Is ManaScience free?" → subscription                     | High
+  Neuroplasticity URL delivered correctly (not broken)      | High
+  "My child has developmental delays." → conditions/general | Medium
+  "My son struggles in school." → conditions/general        | Medium
+  "Brain exercises." (no topic) → neuroplasticity or None   | Medium
+  Cross-category ManaScience queries (sub, privacy, therapy)| Medium
+  Parent-phrasing variants ("my son", "my daughter")        | Low
+
+
+11. SUGGESTED IMPROVEMENTS
+================================================================================
+
+1. Alias promotion discipline
+   Aliases should only contain proper nouns, acronyms, and brand names
+   (MNRI, FAQ, Community Hub). Generic English words (Learning, Training,
+   Help, Support, Reading) belong in trigger examples, not aliases.
+
+2. Alias scope guard
+   Before adding a new alias, verify it does not appear as a single token
+   inside any trigger example or natural language phrase from a different
+   category's expected queries.
+
+3. Parent-language trigger parity
+   Mirror every "My child..." trigger with "My son..." and "My daughter..."
+   variants, or add "son" and "daughter" as related topics on conditions/general.
+
+4. Add ManaScience compound triggers per category
+   For each category that might receive platform-name queries, add explicit
+   compound triggers:
+     - "What therapies does ManaScience offer?" → therapies/general
+     - "Is ManaScience free?"                   → subscription
+     - "Is ManaScience GDPR compliant?"         → privacy
+
+5. Plural/singular coverage
+   Audit all aliases that are single nouns for their plural forms:
+     - "Learning Difficulty" → add "Learning Difficulties"
+     - Check all condition aliases have both singular and plural forms
+
+
+================================================================================
+BUG FIX CHECKLIST
+================================================================================
+
+Work through bugs in priority order. Check each box when the fix is complete
+and verified. Re-run: python -m pytest tests/ -v after every fix.
+
+CRITICAL (fix first — one broken link + one systemic routing failure)
+------------------------------------------------------------------------
+
+[🗸] BUG-04 | URL TYPO in neuroplasticity.md
+            File : data/cta/neuroplasticity/neuroplasticity.md (line 188)
+            Change: /neuroplasiticity
+            To    : /neuroplasticity
+
+[🗸] BUG-01 | "ManaScience" alias pollution in about/about.md
+            File : data/cta/about/about.md
+            Move "ManaScience" and "Mana Science" from Aliases → Trigger Examples
+            Also add to therapies/general.md: "What therapies does ManaScience offer?"
+            Also add to subscription/subscription.md: "Is ManaScience free?"
+            Also add to privacy/privacy_guidelines.md: "Is ManaScience GDPR compliant?"
+
+
+HIGH (fix next — affects multiple real queries)
+------------------------------------------------------------------------
+
+[🗸] BUG-02 | "Learning" / "Training" / "Education" alias pollution in courses.md
+            File : data/cta/courses/courses.md
+            Remove from Aliases: Learning, Training, Education
+            File : data/cta/conditions/general.md
+            Add to Aliases: Learning Difficulties (plural form)
+
+[🗸] BUG-03 | "Help" alias pollution in faq/faq.md
+            File : data/cta/faq/faq.md
+            Remove from Aliases: Help
+            Retain: Help Center, Help page (two-word forms are fine)
+            Optionally add: "I need help" as a Trigger Example
+
+
+MEDIUM (fix before release)
+------------------------------------------------------------------------
+
+[🗸] NEW-02 | "Developmental delays" data gap in conditions/general.md
+            File : data/cta/conditions/general.md
+            Add to Trigger Examples:
+              - "My child has developmental delays."
+              - "My child has a developmental delay."
+            Add to Aliases:
+              - "Developmental Delays"
+
+[🗸] BUG-05 | "Autism" related topic false positive
+            File : data/cta/therapies/neurofeedback.md
+            Remove from Related Topics: Autism
+            File : data/cta/therapies/arrowsmith.md
+            Remove from Related Topics: Autism
+            (trigger examples already cover specific autism+therapy queries)
+
+[🗸] BUG-06 | Substring match overfire on ADHD trigger
+            File : data/cta/conditions/adhd.md
+            Rewrite trigger example:
+              Old: "My child struggles in school because of ADHD."
+              New: "My child with ADHD struggles in school."
+
+[🗸] NEW-01 | "My son / daughter / kid" not covered
+            File : data/cta/conditions/general.md
+            Add to Trigger Examples (at minimum):
+              - "My son struggles in school."
+              - "My son has trouble reading."
+              - "My daughter can't focus."
+              - "My daughter has learning difficulties."
+
+[🗸] NEW-03 | "Reading" related topic too aggressive on Arrowsmith
+            File : data/cta/therapies/arrowsmith.md
+            Replace in Related Topics:
+              Remove : Reading
+              Add    : Reading Difficulties
+
+[🗸] NEW-06 | No Autism CTA (data gap)
+            Action: Create data/cta/conditions/autism.md
+            Follow the same format as conditions/adhd.md
+            After creating, add "Autism" to the Do NOT Trigger examples in
+            data/cta/conditions/general.md
+
+
+LOW (polish pass)
+------------------------------------------------------------------------
+
+[🗸] NEW-07 | "Behaviour" and "Attention" overfire as ADHD related topics
+            File : data/cta/conditions/adhd.md
+            Remove from Related Topics: Behaviour, Attention
+            (both already exist as trigger examples — no signal loss)
+
+[🗸] NEW-04 | "Support" related topic causes spurious FAQ match
+            File : data/cta/faq/faq.md
+            Remove from Related Topics: Support
+            (the alias "Support Center" is sufficient)
+
+[🗸] NEW-05 | "M.N.R.I." alias normalization risk
+            File : data/cta/therapies/mnri.md
+            Remove from Aliases: M.N.R.I.
+            (the "MNRI" alias already covers all practical cases)
+
+
+POST-FIX VERIFICATION
+------------------------------------------------------------------------
+
+[🗸] Run full test suite and confirm 104+ tests pass
+    Command: python -m pytest tests/ -v
+
+[🗸] Confirm corpus loads with zero issues
+    Command: python -m pytest tests/test_cta_loader.py::test_real_cta_corpus_loads_with_zero_issues -v
+
+[🗸] Manually verify these specific queries route correctly after fixes:
+    [🗸] "What therapies does ManaScience offer?" → therapies/general
+    [🗸] "Is ManaScience free?"                   → subscription/subscription
+    [🗸] "Is ManaScience GDPR compliant?"         → privacy/privacy_guidelines
+    [🗸] "My child has learning difficulties."    → conditions/general
+    [🗸] "Learning difficulties."                 → conditions/general
+    [🗸] "Brain exercises." (topic: Brain Training) → neuroplasticity
+    [🗸] "Help me understand brain development."  → neuroplasticity
+    [🗸] "I need help."                           → None
+    [🗸] "My child has developmental delays."     → conditions/general
+    [🗸] "My son has trouble reading."            → conditions/general
+    [🗸] Neuroplasticity CTA URL is not broken
+
+[🗸] Add regression tests for every confirmed bug before closing
+
+================================================================================
+END OF REPORT
+================================================================================
