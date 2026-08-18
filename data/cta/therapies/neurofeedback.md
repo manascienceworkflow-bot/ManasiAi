@@ -170,7 +170,6 @@ Related Topics:
 - Emotional Regulation
 - Brain Function
 - ADHD
-- Anxiety
 - Learning Difficulties
 - Sleep
 
