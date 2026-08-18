@@ -6,13 +6,18 @@ from app.rag.chroma_client import get_client
 from app.rag.embeddings import get_embeddings
 
 INTENT_CONTENT_TYPE_MAP: dict[str, list[str]] = {
-    "concept_explanation": ["neuroplasticity_content", "blog", "research_article"],
+    "concept_explanation": ["neuroplasticity_content", "blog", "research_article", "concern_knowledge"],
     "therapy_information": ["therapy_info", "faq", "blog"],
     "course_information": ["course", "faq"],
     "research_information": ["research_article", "pdf_document"],
     "website_information": ["website_content", "faq"],
-    "personal_concern": ["therapy_info", "practitioner_info", "neuroplasticity_content", "faq"],
-    "emotional_support": ["faq", "website_content"],
+    # concern_knowledge leads for the two intents parents actually arrive with: the
+    # Concern Knowledge Library is authored for exactly these questions, whereas
+    # therapy/FAQ copy was never written to explain a behaviour.
+    "personal_concern": [
+        "concern_knowledge", "therapy_info", "practitioner_info", "neuroplasticity_content", "faq"
+    ],
+    "emotional_support": ["concern_knowledge", "faq", "website_content"],
 }
 
 
