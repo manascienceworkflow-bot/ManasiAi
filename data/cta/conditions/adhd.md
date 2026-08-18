@@ -217,6 +217,7 @@ General condition questions:
 - Can you diagnose me?
 - I think I have something.
 - I'm not sure what condition this is.
+- Give information about the ADHD
 
 Questions about other specific conditions:
 
