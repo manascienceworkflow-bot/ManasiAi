@@ -2,8 +2,7 @@
 venv/
 __pycache__/
 *.pyc
-vectorstore/
-chroma_store/
+
 
 # Unrequired / non-source files
 docs/
